@@ -170,5 +170,5 @@ test('reports: add, by date, recent', () => {
   assert.strictEqual(R.onDate(db, '2026-09-21').length, 1);
   assert.strictEqual(R.recent(db, 5)[0].file_id, 'F2');
   assert.strictEqual(R.between(db, '2026-09-01', '2026-09-30').length, 2);
-  assert.match(R.line(R.recent(db, 1)[0]), /📷 фото · Власник/);
+  assert.match(R.line(R.byId(db, 1)), /📷 фото · Власник/);
 });
