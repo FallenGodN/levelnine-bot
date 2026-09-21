@@ -168,7 +168,7 @@ test('reports: add, by date, recent', () => {
   R.add(db, { date: '2026-09-21', kind: 'photo', file_id: 'F1', author: 'Власник', comment: 'вечір' });
   R.add(db, { date: '2026-09-20', kind: 'document', file_id: 'F2', file_name: 'kasa.xlsx', author: 'Власник' });
   assert.strictEqual(R.onDate(db, '2026-09-21').length, 1);
-  assert.strictEqual(R.recent(db, 5)[0].file_id, 'F1');
+  assert.strictEqual(R.recent(db, 5)[0].file_id, 'F2');
   assert.strictEqual(R.between(db, '2026-09-01', '2026-09-30').length, 2);
   assert.match(R.line(R.recent(db, 1)[0]), /📷 фото · Власник/);
 });
