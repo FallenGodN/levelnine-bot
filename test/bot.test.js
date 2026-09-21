@@ -315,6 +315,13 @@ test('admin group setup via /chatid, settings screen, who is working, history', 
   await h.cb(OWNER, 'em:add'); await h.text(OWNER, 'Олена'); await h.cb(OWNER, 'em:pt:daily'); await h.text(OWNER, '1200'); await h.cb(OWNER, 'em:g:f');
   const ol = h.db.prepare("SELECT * FROM employees WHERE name = 'Олена'").get();
   assert.deepStrictEqual([ol.pay_type, ol.rate, ol.gender], ['daily', 1200, 'f']);
+  await h.cb(OWNER, 'em:add'); await h.text(OWNER, 'Максим'); await h.cb(OWNER, 'em:pt:none'); await h.cb(OWNER, 'em:g:m');
+  const mx = h.db.prepare("SELECT * FROM employees WHERE name = 'Максим'").get();
+  assert.deepStrictEqual([mx.pay_type, mx.rate], ['none', 0]);
+  await h.cb(OWNER, `em:adm:${mx.id}`);
+  assert.strictEqual(E.byId(h.db, mx.id).role, 'admin');
+  await h.text(OWNER, B.monthly);
+  assert.doesNotMatch(h.lastText(OWNER), /Максим/);
   await h.cb(OWNER, `em:tg:${ol.id}`); await h.text(OWNER, '3003');
   assert.strictEqual(E.byTelegram(h.db, 3003).name, 'Олена');
   await h.cb(OWNER, 'em:rate:3'); await h.text(OWNER, '13000');

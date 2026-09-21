@@ -8,9 +8,9 @@ function add(db, r) {
   return byId(db, res.lastInsertRowid);
 }
 function byId(db, id) { return db.prepare('SELECT * FROM reports WHERE id = ?').get(id) || null; }
-function recent(db, n = 10) { return db.prepare('SELECT * FROM reports ORDER BY created_at DESC LIMIT ?').all(n); }
+function recent(db, n = 10) { return db.prepare('SELECT * FROM reports ORDER BY created_at DESC, id DESC LIMIT ?').all(n); }
 function onDate(db, date) { return db.prepare('SELECT * FROM reports WHERE date = ? ORDER BY created_at').all(date); }
-function between(db, from, to) { return db.prepare('SELECT * FROM reports WHERE date >= ? AND date <= ? ORDER BY created_at DESC').all(from, to); }
+function between(db, from, to) { return db.prepare('SELECT * FROM reports WHERE date >= ? AND date <= ? ORDER BY created_at DESC, id DESC').all(from, to); }
 function setComment(db, id, comment) { db.prepare('UPDATE reports SET comment = ? WHERE id = ?').run(comment, id); }
 
 const KIND = { photo: '📷 фото', document: '📎 документ', text: '📝 текст' };

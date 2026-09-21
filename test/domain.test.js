@@ -21,6 +21,21 @@ test('seed: four accounts with the right rates', () => {
   ]);
 });
 
+test('OWNER_TELEGRAM_ID reassigns the owner account on start', () => {
+  const config = require('../src/config');
+  const dir = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'ln9own-'));
+  const file = require('path').join(dir, 'o.sqlite');
+  config.ownerTelegramId = 111; let db = open(file);
+  assert.strictEqual(E.owner(db).telegram_id, 111); db.close();
+  config.ownerTelegramId = 222; db = open(file);
+  assert.strictEqual(E.owner(db).telegram_id, 222);
+  assert.strictEqual(E.byTelegram(db, 111), null); db.close();
+  E.link(open(file), 1, 333, null);
+  config.ownerTelegramId = 333; db = open(file); // taken by Юлія → owner stays 222
+  assert.strictEqual(E.owner(db).telegram_id, 222); db.close();
+  config.ownerTelegramId = 0;
+});
+
 test('kyiv time: DST boundaries and parsing', () => {
   assert.strictEqual(T.parts(at('2026-07-01', '08:00')).time, '08:00');
   assert.strictEqual(T.parts(at('2026-01-15', '23:30')).date, '2026-01-15');

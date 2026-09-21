@@ -111,8 +111,9 @@ function open(file) {
     for (const e of SEED) ins.run(e);
   }
   if (config.ownerTelegramId) {
-    const taken = db.prepare('SELECT id FROM employees WHERE telegram_id = ?').get(config.ownerTelegramId);
-    if (!taken) db.prepare("UPDATE employees SET telegram_id = ? WHERE role = 'owner' AND telegram_id IS NULL").run(config.ownerTelegramId);
+    // OWNER_TELEGRAM_ID — головний: змінили змінну → власником стає цей акаунт
+    const taken = db.prepare('SELECT id, role FROM employees WHERE telegram_id = ?').get(config.ownerTelegramId);
+    if (!taken) db.prepare("UPDATE employees SET telegram_id = ? WHERE role = 'owner'").run(config.ownerTelegramId);
   }
   db.file = dbFile;
   db.setting = (k, v) => {

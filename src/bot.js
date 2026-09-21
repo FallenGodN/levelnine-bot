@@ -284,7 +284,9 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       if (a === 'add') { setFlow(uid, { name: 'emadd', step: 'name' }); await say(ctx, "Ім'я нового працівника:", cancelKb()); return; }
       if (a === 'pt') {
         if (!f || f.name !== 'emadd') return;
-        f.data.pay_type = b; f.step = 'rate'; await dropButtons(ctx);
+        f.data.pay_type = b; await dropButtons(ctx);
+        if (b === 'none') { f.data.rate = 0; f.step = 'g'; await say(ctx, 'Як підписати кнопки?', new InlineKeyboard().text('Прийшла / Пішла', 'em:g:f').text('Прийшов / Пішов', 'em:g:m')); return; }
+        f.step = 'rate';
         await say(ctx, b === 'daily' ? 'Ставка за робочий день, грн:' : 'Ставка за місяць, грн:', cancelKb());
         return;
       }
@@ -675,7 +677,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       return say(ctx, 'Підтвердіть кнопкою вище або скасуйте.', cancelKb());
     }
     if (f.name === 'emadd') {
-      if (f.step === 'name') { if (text.length < 2) return say(ctx, "Ім'я закоротке:", cancelKb()); f.data.name = text; f.step = 'pt'; return say(ctx, 'Тип оплати:', new InlineKeyboard().text('За робочий день', 'em:pt:daily').text('За місяць', 'em:pt:monthly')); }
+      if (f.step === 'name') { if (text.length < 2) return say(ctx, "Ім'я закоротке:", cancelKb()); f.data.name = text; f.step = 'pt'; return say(ctx, 'Тип оплати:', new InlineKeyboard().text('За робочий день', 'em:pt:daily').text('За місяць', 'em:pt:monthly').row().text('Без зарплати (адміністратор)', 'em:pt:none')); }
       if (f.step === 'rate') { const n = Number(text.replace(/\s/g, '')); if (!Number.isInteger(n) || n < 0) return say(ctx, 'Введіть ціле число:', cancelKb()); f.data.rate = n; f.step = 'g'; return say(ctx, 'Як підписати кнопки?', new InlineKeyboard().text('Прийшла / Пішла', 'em:g:f').text('Прийшов / Пішов', 'em:g:m')); }
       return say(ctx, 'Оберіть кнопкою вище або скасуйте.', cancelKb());
     }
