@@ -68,6 +68,7 @@ function createScheduler({ db, notify, api, now = () => new Date() }) {
 
   async function backupNow() {
     if (!db.file || db.file === ':memory:') return { ok: false, reason: 'memory db' };
+    if (!notify.ownerId()) return { ok: false, reason: 'власника ще не прив’язано' };
     const dir = path.join(config.dataDir, 'backups');
     fs.mkdirSync(dir, { recursive: true });
     const p = T.parts(now());
