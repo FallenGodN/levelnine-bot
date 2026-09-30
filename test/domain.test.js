@@ -36,6 +36,17 @@ test('OWNER_TELEGRAM_ID reassigns the owner account on start', () => {
   config.ownerTelegramId = 0;
 });
 
+test('EXTRA_ADMINS creates admins without salary, idempotent', () => {
+  const config = require('../src/config');
+  config.extraAdmins = [{ telegram_id: 947529523, name: 'Максим' }];
+  let db = open(':memory:');
+  const mx = E.byTelegram(db, 947529523);
+  assert.deepStrictEqual([mx.name, mx.role, mx.pay_type, mx.rate], ['Максим', 'admin', 'none', 0]);
+  assert.strictEqual(db.prepare('SELECT COUNT(*) c FROM employees').get().c, 5);
+  assert.doesNotMatch(JSON.stringify(P.monthlyReport(db, '2026-09').rows.map((r) => r.emp.name)), /Максим/);
+  config.extraAdmins = [];
+});
+
 test('kyiv time: DST boundaries and parsing', () => {
   assert.strictEqual(T.parts(at('2026-07-01', '08:00')).time, '08:00');
   assert.strictEqual(T.parts(at('2026-01-15', '23:30')).date, '2026-01-15');

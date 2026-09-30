@@ -115,6 +115,11 @@ function open(file) {
     const taken = db.prepare('SELECT id, role FROM employees WHERE telegram_id = ?').get(config.ownerTelegramId);
     if (!taken) db.prepare("UPDATE employees SET telegram_id = ? WHERE role = 'owner'").run(config.ownerTelegramId);
   }
+  for (const a of config.extraAdmins || []) {
+    const has = db.prepare('SELECT id, role FROM employees WHERE telegram_id = ?').get(a.telegram_id);
+    if (!has) db.prepare("INSERT INTO employees (name, role, pay_type, rate, gender, telegram_id) VALUES (?, 'admin', 'none', 0, 'm', ?)").run(a.name, a.telegram_id);
+    else if (has.role === 'employee') db.prepare("UPDATE employees SET role = 'admin' WHERE id = ?").run(has.id);
+  }
   db.file = dbFile;
   db.setting = (k, v) => {
     if (v === undefined) { const r = db.prepare('SELECT value FROM settings WHERE key = ?').get(k); return r ? r.value : null; }

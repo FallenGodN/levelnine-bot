@@ -22,6 +22,8 @@ const config = {
   openaiMonthlyLimitUsd: Number(env('OPENAI_MONTHLY_LIMIT_USD', 10)),
   ownerTelegramId: Number(env('OWNER_TELEGRAM_ID', 0)) || 0,
   adminChatId: Number(env('ADMIN_CHAT_ID', 0)) || 0,
+  // Додаткові адміністратори без зарплати: EXTRA_ADMINS=947529523:Максим,123456:Олена
+  extraAdmins: String(env('EXTRA_ADMINS', '')).split(',').map((s) => s.trim()).filter(Boolean).map((s) => { const [id, ...n] = s.split(':'); return { telegram_id: Number(id), name: n.join(':').trim() || `Адмін ${id}` }; }).filter((a) => a.telegram_id > 0),
   dailyReportTime: env('DAILY_REPORT_TIME', '22:30'),
   backupTime: env('BACKUP_TIME', '03:30'),
   dataDir: path.resolve(env('DATA_DIR', './data')),
