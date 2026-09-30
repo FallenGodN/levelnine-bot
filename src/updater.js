@@ -32,15 +32,23 @@ function createUpdater({ exec = run, root = ROOT, branch = 'main', log = console
     return cachedVersion;
   }
 
-  /** Чи є нові коміти на origin. */
+  // Версія, з якою процес стартував: оновлення = origin відрізняється від НЕЇ, а не від папки
+  // (у папці міг бути свіжий коміт, зроблений після запуску — процес усе одно старий).
+  let startHash = null;
+  async function running() {
+    if (!startHash) startHash = await exec('git', ['rev-parse', 'HEAD'], { cwd: root });
+    return startHash;
+  }
+
+  /** Чи є нові коміти на origin відносно запущеної версії. */
   async function check() {
     if (!hasGit()) return { ok: false, reason: 'папка не є git-репозиторієм' };
     try {
+      const local = await running();
       await exec('git', ['fetch', '--quiet', 'origin', branch], { cwd: root });
-      const local = await exec('git', ['rev-parse', 'HEAD'], { cwd: root });
       const remote = await exec('git', ['rev-parse', `origin/${branch}`], { cwd: root });
       const behind = local !== remote;
-      const changes = behind ? await exec('git', ['log', '--oneline', `HEAD..origin/${branch}`], { cwd: root }) : '';
+      const changes = behind ? await exec('git', ['log', '--oneline', `${local}..origin/${branch}`], { cwd: root }) : '';
       return { ok: true, behind, local: local.slice(0, 7), remote: remote.slice(0, 7), changes: changes.split('\n').filter(Boolean) };
     } catch (e) {
       return { ok: false, reason: (e.stderr || e.message || '').trim().split('\n')[0] || 'git недоступний' };
@@ -54,7 +62,8 @@ function createUpdater({ exec = run, root = ROOT, branch = 'main', log = console
     if (!before.behind) return { ok: true, updated: false, version: before.local };
     try {
       const lockBefore = fs.existsSync(path.join(root, 'package-lock.json')) ? fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8') : '';
-      await exec('git', ['pull', '--ff-only', '--quiet', 'origin', branch], { cwd: root });
+      const head = await exec('git', ['rev-parse', 'HEAD'], { cwd: root });
+      if (head !== before.remote && !head.startsWith(before.remote)) await exec('git', ['pull', '--ff-only', '--quiet', 'origin', branch], { cwd: root });
       const lockAfter = fs.existsSync(path.join(root, 'package-lock.json')) ? fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8') : '';
       let deps = false;
       if (lockBefore !== lockAfter) {
@@ -62,6 +71,7 @@ function createUpdater({ exec = run, root = ROOT, branch = 'main', log = console
         await exec(isWin ? 'npm.cmd' : 'npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], { cwd: root, timeout: 600000 });
       }
       cachedVersion = null;
+      startHash = await exec('git', ['rev-parse', 'HEAD'], { cwd: root }); // процес зараз перезапуститься на цій версії
       const v = await version();
       log.log(`updated ${before.local} → ${v.hash}${deps ? ' (+deps)' : ''}`);
       return { ok: true, updated: true, from: before.local, to: v.hash, deps, changes: before.changes };

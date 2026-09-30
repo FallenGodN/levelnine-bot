@@ -24,6 +24,7 @@ function fakeGit(state) {
     if (cmd === 'git' && a.startsWith('log -1')) return `${state.head.slice(0, 7)}|2026-09-30|latest commit`;
     if (cmd === 'git' && a.startsWith('fetch')) { if (state.offline) throw Object.assign(new Error('fetch'), { stderr: 'fatal: unable to access' }); return ''; }
     if (cmd === 'git' && a === 'rev-parse HEAD') return state.head;
+    if (cmd === 'git' && a === 'rev-parse origin/master') return state.remote;
     if (cmd === 'git' && a === 'rev-parse origin/main') return state.remote;
     if (cmd === 'git' && a.startsWith('log --oneline')) return state.changes.join('\n');
     if (cmd === 'git' && a.startsWith('pull')) { state.head = state.remote; if (state.newLock) fs.writeFileSync(path.join(state.root, 'package-lock.json'), state.newLock); return ''; }
@@ -63,6 +64,21 @@ test('updater: version, check behind/up-to-date, apply pulls and installs deps o
   assert.strictEqual(c3.ok, false); assert.match(c3.reason, /unable to access/);
   const noGit = createUpdater({ exec: g.exec, root: os.tmpdir() });
   assert.strictEqual((await noGit.check()).ok, false);
+});
+
+test('updater: a commit made in the folder after start still counts as an update (no pull needed)', async () => {
+  const root = gitRoot();
+  const state = { root, head: 'aaaaaaa111', remote: 'aaaaaaa111', changes: [] };
+  const g = fakeGit(state);
+  const u = createUpdater({ exec: g.exec, root, log: { log() {} } });
+  assert.strictEqual((await u.check()).behind, false);
+  // someone commits + pushes from this very folder: HEAD moves together with origin
+  state.head = 'bbbbbbb222'; state.remote = 'bbbbbbb222'; state.changes = ['bbbbbbb local commit'];
+  const c = await u.check();
+  assert.deepStrictEqual([c.behind, c.local, c.remote], [true, 'aaaaaaa', 'bbbbbbb']);
+  const r = await u.apply();
+  assert.deepStrictEqual([r.ok, r.updated, r.from, r.to], [true, true, 'aaaaaaa', 'bbbbbbb']);
+  assert.ok(!g.calls.some((c) => c[1] === 'pull'));
 });
 
 function harness() {
