@@ -46,19 +46,41 @@ if (-not (Have 'git')) {
 Say "[2/5] Git: $((git --version) -replace 'git version ','')"
 
 # --- код бота ---
+function Run-Retry($label, $cmdline, $tries = 4) {
+  for ($t = 1; $t -le $tries; $t++) {
+    $p = Start-Process cmd.exe -ArgumentList "/c $cmdline" -Wait -PassThru -NoNewWindow
+    if ($p.ExitCode -eq 0) { return $true }
+    Say "      $label — спроба $t не вдалася (мережа), повторюю через 8 с..."
+    Start-Sleep -Seconds 8
+  }
+  return $false
+}
 if ($Dir -eq $here) {
   Say "[3/5] Використовую цю папку: $Dir"
-} elseif (Test-Path (Join-Path $Dir '.git')) {
-  Say "[3/5] Оновлюю бота в $Dir (відновлюю всі файли з GitHub)..."
-  $p = Start-Process cmd.exe -ArgumentList "/c git -C `"$Dir`" fetch --quiet origin main && git -C `"$Dir`" reset --hard --quiet origin/main" -Wait -PassThru -NoNewWindow
-  if ($p.ExitCode -ne 0) { Fail 'git fetch/reset не вдався' }
 } else {
-  Say "[3/5] Завантажую бота в $Dir..."
-  $p = Start-Process cmd.exe -ArgumentList "/c git clone --quiet $Repo `"$Dir`"" -Wait -PassThru -NoNewWindow
-  if ($p.ExitCode -ne 0) { Fail 'git clone не вдався' }
+  $broken = (Test-Path $Dir) -and -not ((Test-Path (Join-Path $Dir '.git\HEAD')) -and (Test-Path (Join-Path $Dir 'package.json')))
+  if ($broken) {
+    Say "[3/5] Папка $Dir пошкоджена — зберігаю .env і дані, створюю заново..."
+    $keep = Join-Path $env:TEMP 'levelnine-keep'
+    New-Item -ItemType Directory -Force $keep | Out-Null
+    if (Test-Path (Join-Path $Dir '.env')) { Copy-Item (Join-Path $Dir '.env') (Join-Path $keep '.env') -Force }
+    if (Test-Path (Join-Path $Dir 'data')) { if (Test-Path (Join-Path $keep 'data')) { Remove-Item (Join-Path $keep 'data') -Recurse -Force }; Move-Item (Join-Path $Dir 'data') (Join-Path $keep 'data') -Force }
+    cmd /c "rmdir /s /q `"$Dir`"" 2>$null | Out-Null
+    if (Test-Path $Dir) { Fail "не можу видалити $Dir — закрийте програми, що його використовують" }
+  }
+  if (Test-Path (Join-Path $Dir '.git\HEAD')) {
+    Say "[3/5] Оновлюю бота в $Dir..."
+    if (-not (Run-Retry 'git' "git -C `"$Dir`" fetch --quiet origin main && git -C `"$Dir`" reset --hard --quiet origin/main")) { Fail 'git fetch не вдався після 4 спроб' }
+  } else {
+    Say "[3/5] Завантажую бота в $Dir..."
+    if (-not (Run-Retry 'git clone' "git clone --quiet --depth 1 --branch main $Repo `"$Dir`"")) { Fail 'git clone не вдався після 4 спроб' }
+    $keep = Join-Path $env:TEMP 'levelnine-keep'
+    if (Test-Path (Join-Path $keep '.env')) { Copy-Item (Join-Path $keep '.env') (Join-Path $Dir '.env') -Force; Say '      .env відновлено' }
+    if (Test-Path (Join-Path $keep 'data')) { Move-Item (Join-Path $keep 'data') (Join-Path $Dir 'data') -Force; Say '      дані відновлено' }
+  }
 }
 Set-Location $Dir
-if (-not (Test-Path (Join-Path $Dir 'package.json'))) { Fail "у $Dir немає package.json навіть після відновлення — перевірте антивірус" }
+if (-not (Test-Path (Join-Path $Dir 'package.json'))) { Fail "у $Dir немає package.json навіть після завантаження — перевірте антивірус" }
 
 Say '[4/5] Встановлюю залежності (1–2 хв)...'
 $ok = $false
@@ -80,9 +102,10 @@ pm-install.log)" }
 if (-not (Test-Path '.env')) {
   Write-Host ""
   Say 'Потрібно два значення. Токен беруть у @BotFather, ID власника показує бот на /start.'
-  $token = Read-Host '  Токен бота (BOT_TOKEN)'
-  $owner = Read-Host '  Telegram ID власника (OWNER_TELEGRAM_ID)'
-  $openai = Read-Host '  Ключ OpenAI (Enter — пропустити)'
+  $token = "$(Read-Host '  Токен бота (BOT_TOKEN)')"
+  $owner = "$(Read-Host '  Telegram ID власника (OWNER_TELEGRAM_ID)')"
+  $openai = "$(Read-Host '  Ключ OpenAI (Enter — пропустити)')"
+  if (-not $token.Trim()) { Fail 'токен порожній — запустіть інсталятор ще раз і введіть токен' }
   @(
     "BOT_TOKEN=$($token.Trim())", "OWNER_TELEGRAM_ID=$($owner.Trim())", "OPENAI_API_KEY=$($openai.Trim())",
     'OPENAI_MODEL=gpt-4.1-mini', 'OPENAI_MONTHLY_LIMIT_USD=10', 'DAILY_REPORT_TIME=22:30', 'BACKUP_TIME=03:30', 'DATA_DIR=./data', 'TZ_NAME=Europe/Kyiv'
