@@ -1,0 +1,93 @@
+﻿# LEVEL NINE GYM bot — встановлення на Windows без winget (Node.js і Git напряму з офіційних сайтів).
+# Запускається з install.cmd; можна й вручну: powershell -ExecutionPolicy Bypass -File install.ps1
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$Repo = 'https://github.com/FallenGodN/levelnine-bot.git'
+$Dir = 'C:\levelnine-bot'
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+if (Test-Path (Join-Path $here 'src\index.js')) { $Dir = $here }
+
+function Say($t) { Write-Host "  $t" }
+function Fail($t) { Write-Host ""; Write-Host "  ПОМИЛКА: $t" -ForegroundColor Red; Write-Host "  Зробіть скріншот цього вікна і надішліть Максиму."; Read-Host "  Enter, щоб закрити" | Out-Null; exit 1 }
+function Refresh-Path { $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ";$env:ProgramFiles\nodejs;$env:ProgramFiles\Git\cmd" }
+function Have($exe) { Refresh-Path; return [bool](Get-Command $exe -ErrorAction SilentlyContinue) }
+
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Write-Host ""; Write-Host "  === LEVEL NINE bot: встановлення ==="; Write-Host ""
+
+# --- Node.js ---
+if (-not (Have 'node')) {
+  Say '[1/5] Завантажую Node.js (LTS) з nodejs.org...'
+  $sums = Invoke-RestMethod 'https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt'
+  $msi = ($sums -split "`n" | Where-Object { $_ -match 'node-v[\d\.]+-x64\.msi' } | Select-Object -First 1) -replace '.*\s', ''
+  if (-not $msi) { Fail 'не знайшов інсталятор Node.js' }
+  $msiPath = Join-Path $env:TEMP $msi
+  Invoke-WebRequest "https://nodejs.org/dist/latest-v22.x/$msi" -OutFile $msiPath
+  Say "      Встановлюю $msi (підтвердьте запит Windows, якщо з'явиться)..."
+  $p = Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /passive /norestart" -Wait -PassThru
+  if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { Fail "msiexec завершився з кодом $($p.ExitCode)" }
+  if (-not (Have 'node')) { Fail 'Node.js встановлено, але не знайдено в PATH. Перезапустіть інсталятор.' }
+}
+Say "[1/5] Node.js: $(node -v)"
+
+# --- Git ---
+if (-not (Have 'git')) {
+  Say '[2/5] Завантажую Git з git-scm.com...'
+  $rel = Invoke-RestMethod 'https://api.github.com/repos/git-for-windows/git/releases/latest' -Headers @{ 'User-Agent' = 'levelnine-installer' }
+  $asset = $rel.assets | Where-Object { $_.name -match '^Git-[\d\.]+-64-bit\.exe$' } | Select-Object -First 1
+  if (-not $asset) { Fail 'не знайшов інсталятор Git' }
+  $gitExe = Join-Path $env:TEMP $asset.name
+  Invoke-WebRequest $asset.browser_download_url -OutFile $gitExe
+  Say "      Встановлюю $($asset.name)..."
+  $p = Start-Process $gitExe -ArgumentList '/VERYSILENT /NORESTART /NOCANCEL /SP- /COMPONENTS="gitlfs" /o:PathOption=Cmd' -Wait -PassThru
+  if ($p.ExitCode -ne 0) { Fail "інсталятор Git завершився з кодом $($p.ExitCode)" }
+  if (-not (Have 'git')) { Fail 'Git встановлено, але не знайдено в PATH. Перезапустіть інсталятор.' }
+}
+Say "[2/5] Git: $((git --version) -replace 'git version ','')"
+
+# --- код бота ---
+if ($Dir -eq $here) {
+  Say "[3/5] Використовую цю папку: $Dir"
+} elseif (Test-Path (Join-Path $Dir '.git')) {
+  Say "[3/5] Оновлюю бота в $Dir..."
+  git -C $Dir pull --ff-only origin main | Out-Null
+} else {
+  Say "[3/5] Завантажую бота в $Dir..."
+  git clone --quiet $Repo $Dir
+}
+Set-Location $Dir
+
+Say '[4/5] Встановлюю залежності...'
+& npm install --omit=dev --no-audit --no-fund 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) { Fail 'npm install не вдався' }
+
+if (-not (Test-Path '.env')) {
+  Write-Host ""
+  Say 'Потрібно два значення. Токен беруть у @BotFather, ID власника показує бот на /start.'
+  $token = Read-Host '  Токен бота (BOT_TOKEN)'
+  $owner = Read-Host '  Telegram ID власника (OWNER_TELEGRAM_ID)'
+  $openai = Read-Host '  Ключ OpenAI (Enter — пропустити)'
+  @(
+    "BOT_TOKEN=$($token.Trim())", "OWNER_TELEGRAM_ID=$($owner.Trim())", "OPENAI_API_KEY=$($openai.Trim())",
+    'OPENAI_MODEL=gpt-4.1-mini', 'OPENAI_MONTHLY_LIMIT_USD=10', 'DAILY_REPORT_TIME=22:30', 'BACKUP_TIME=03:30', 'DATA_DIR=./data', 'TZ_NAME=Europe/Kyiv'
+  ) | Set-Content -Path '.env' -Encoding ASCII
+  Say '.env збережено.'
+}
+
+Say '[5/5] Вмикаю автозапуск і запускаю бота...'
+$startup = [Environment]::GetFolderPath('Startup')
+$vbs = Join-Path $startup 'LevelNineBot.vbs'
+@("Set sh = CreateObject(""WScript.Shell"")", "sh.Run ""cmd /c """"$Dir\tools\run-bot.cmd"""""", 0, False") | Set-Content -Path $vbs -Encoding ASCII
+& (Join-Path $Dir 'tools\stop-bot.cmd') | Out-Null
+Start-Process wscript.exe -ArgumentList '//B', "`"$vbs`""
+Start-Sleep -Seconds 10
+Write-Host ""
+$log = Join-Path $Dir 'bot.log'
+if ((Test-Path $log) -and (Select-String -Path $log -Pattern 'працює' -Quiet)) {
+  Say "ГОТОВО. Бот працює і стартуватиме сам після кожного ввімкнення комп'ютера."
+} else {
+  Say "Бот запущений, але ще не відповів. Подивіться bot.log у $Dir через хвилину."
+}
+Say 'Оновлення підтягуються з GitHub автоматично кожні 10 хвилин.'
+Write-Host ""
+Read-Host '  Enter, щоб закрити' | Out-Null
