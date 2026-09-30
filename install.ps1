@@ -1,6 +1,6 @@
 ﻿# LEVEL NINE GYM bot — встановлення на Windows без winget (Node.js і Git напряму з офіційних сайтів).
 # Запускається з install.cmd; можна й вручну: powershell -ExecutionPolicy Bypass -File install.ps1
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'  # npm/git пишуть попередження в stderr — це не помилки; перевіряємо коди виходу вручну
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $Repo = 'https://github.com/FallenGodN/levelnine-bot.git'
 $Dir = 'C:\levelnine-bot'
@@ -18,7 +18,7 @@ Write-Host ""; Write-Host "  === LEVEL NINE bot: встановлення ==="; 
 # --- Node.js ---
 if (-not (Have 'node')) {
   Say '[1/5] Завантажую Node.js (LTS) з nodejs.org...'
-  $sums = Invoke-RestMethod 'https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt'
+  try { $sums = Invoke-RestMethod 'https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt' } catch { Fail "немає доступу до nodejs.org: $($_.Exception.Message)" }
   $msi = ($sums -split "`n" | Where-Object { $_ -match 'node-v[\d\.]+-x64\.msi' } | Select-Object -First 1) -replace '.*\s', ''
   if (-not $msi) { Fail 'не знайшов інсталятор Node.js' }
   $msiPath = Join-Path $env:TEMP $msi
@@ -33,7 +33,7 @@ Say "[1/5] Node.js: $(node -v)"
 # --- Git ---
 if (-not (Have 'git')) {
   Say '[2/5] Завантажую Git з git-scm.com...'
-  $rel = Invoke-RestMethod 'https://api.github.com/repos/git-for-windows/git/releases/latest' -Headers @{ 'User-Agent' = 'levelnine-installer' }
+  try { $rel = Invoke-RestMethod 'https://api.github.com/repos/git-for-windows/git/releases/latest' -Headers @{ 'User-Agent' = 'levelnine-installer' } } catch { Fail "немає доступу до github.com: $($_.Exception.Message)" }
   $asset = $rel.assets | Where-Object { $_.name -match '^Git-[\d\.]+-64-bit\.exe$' } | Select-Object -First 1
   if (-not $asset) { Fail 'не знайшов інсталятор Git' }
   $gitExe = Join-Path $env:TEMP $asset.name
@@ -50,16 +50,19 @@ if ($Dir -eq $here) {
   Say "[3/5] Використовую цю папку: $Dir"
 } elseif (Test-Path (Join-Path $Dir '.git')) {
   Say "[3/5] Оновлюю бота в $Dir..."
-  git -C $Dir pull --ff-only origin main | Out-Null
+  $p = Start-Process cmd.exe -ArgumentList "/c git -C `"$Dir`" pull --ff-only origin main" -Wait -PassThru -NoNewWindow
+  if ($p.ExitCode -ne 0) { Fail 'git pull не вдався' }
 } else {
   Say "[3/5] Завантажую бота в $Dir..."
-  git clone --quiet $Repo $Dir
+  $p = Start-Process cmd.exe -ArgumentList "/c git clone --quiet $Repo `"$Dir`"" -Wait -PassThru -NoNewWindow
+  if ($p.ExitCode -ne 0) { Fail 'git clone не вдався' }
 }
 Set-Location $Dir
 
-Say '[4/5] Встановлюю залежності...'
-& npm install --omit=dev --no-audit --no-fund 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) { Fail 'npm install не вдався' }
+Say '[4/5] Встановлюю залежності (1–2 хв)...'
+$p = Start-Process cmd.exe -ArgumentList '/c npm install --omit=dev --no-audit --no-fund > npm-install.log 2>&1' -Wait -PassThru -NoNewWindow -WorkingDirectory $Dir
+if ($p.ExitCode -ne 0) { Fail "npm install не вдався (див. $Dir
+pm-install.log)" }
 
 if (-not (Test-Path '.env')) {
   Write-Host ""
