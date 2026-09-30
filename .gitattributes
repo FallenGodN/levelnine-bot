@@ -1,6 +1,6 @@
 * text=auto
-*.cmd text eol=crlf
-*.vbs text eol=crlf
+*.cmd -text
+*.vbs -text
 *.js text eol=lf
 *.md text eol=lf
 *.json text eol=lf
