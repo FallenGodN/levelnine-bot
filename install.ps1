@@ -60,8 +60,14 @@ if ($Dir -eq $here) {
 Set-Location $Dir
 
 Say '[4/5] Встановлюю залежності (1–2 хв)...'
-$p = Start-Process cmd.exe -ArgumentList '/c npm install --omit=dev --no-audit --no-fund > npm-install.log 2>&1' -Wait -PassThru -NoNewWindow -WorkingDirectory $Dir
-if ($p.ExitCode -ne 0) { Fail "npm install не вдався (див. $Dir
+$ok = $false
+for ($try = 1; $try -le 4; $try++) {
+  $p = Start-Process cmd.exe -ArgumentList '/c npm install --omit=dev --no-audit --no-fund --fetch-retries=5 --fetch-retry-maxtimeout=60000 > npm-install.log 2>&1' -Wait -PassThru -NoNewWindow -WorkingDirectory $Dir
+  if ($p.ExitCode -eq 0) { $ok = $true; break }
+  Say "      спроба $try не вдалася (мережа?), повторюю через 10 с..."
+  Start-Sleep -Seconds 10
+}
+if (-not $ok) { Fail "npm install не вдався після 4 спроб (див. $Dir
 pm-install.log)" }
 
 if (-not (Test-Path '.env')) {
