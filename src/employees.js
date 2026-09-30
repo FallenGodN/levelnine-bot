@@ -38,7 +38,7 @@ function redeemCode(db, code, tgId) {
   return r.ok ? { ok: true, emp: byId(db, emp.id) } : r;
 }
 
-function add(db, { name, pay_type = 'daily', rate = 0, gender = 'f', role = 'employee' }, actorId) {
+function add(db, { name, pay_type = 'hourly', rate = 0, gender = 'f', role = 'employee' }, actorId) {
   const r = db.prepare('INSERT INTO employees (name, role, pay_type, rate, gender) VALUES (?, ?, ?, ?, ?)').run(name.trim(), role, pay_type, rate, gender);
   db.audit(actorId, 'employee.add', { id: r.lastInsertRowid, name, pay_type, rate });
   return byId(db, r.lastInsertRowid);
@@ -57,7 +57,7 @@ function setActive(db, empId, active, actorId) {
   db.audit(actorId, 'employee.active', { empId, active });
 }
 
-const payText = (e) => (e.pay_type === 'daily' ? `${e.rate} грн/день` : e.pay_type === 'monthly' ? `${e.rate} грн/міс` : '0 грн');
+const payText = (e) => (e.pay_type === 'hourly' ? `${e.rate} грн/год` : e.pay_type === 'daily' ? `${e.rate} грн/день` : e.pay_type === 'monthly' ? `${e.rate} грн/міс` : 'без зарплати');
 const roleText = (e) => (e.role === 'owner' ? 'власник' : e.role === 'admin' ? 'адміністратор' : 'працівник');
 const came = (e) => (e.gender === 'm' ? 'Прийшов' : 'Прийшла');
 const left = (e) => (e.gender === 'm' ? 'Пішов' : 'Пішла');

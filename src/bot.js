@@ -9,49 +9,51 @@ const E = require('./employees');
 const S = require('./shifts');
 const P = require('./payroll');
 const R = require('./reports');
+const H = require('./help');
 const { esc } = require('./notify');
-const { isImage } = require('./extract');
 
 const B = {
   stats: '📊 Моя статистика', salary: '💰 Моя зарплата',
-  sendReport: '📸 Надіслати звіт каси', viewReports: '📁 Переглянути звіти', ai: '🤖 AI-помічник',
-  employees: '👥 Працівники', working: '🟢 Хто працює', history: '📅 Історія змін',
-  payroll: '💰 Зарплата', advance: '➕ Додати аванс', payout: '💸 Додати виплату',
-  fixShift: '📝 Виправити зміну', cashReport: '📸 Звіт каси', monthly: '📊 Місячний звіт',
-  alarm: '🚨 ТЕРМІНОВО', settings: '⚙️ Налаштування',
-  menu: '⬅️ Меню', cancel: '❌ Скасувати', skip: '➡️ Пропустити', exitAi: '⬅️ Вийти з AI', noText: '➡️ Без тексту',
+  cash: '💵 Звіт каси', photo: '📷 Фото-звіт', problem: '⚠️ Проблема', help: '🆘 Допомога',
+  panel: '👑 Панель', working: '🟢 Хто працює', employees: '👥 Працівники', history: '📅 Історія змін',
+  payroll: '💰 Зарплата', advance: '➕ Аванс', payout: '💸 Виплата', fixShift: '📝 Виправити зміну',
+  reports: '📁 Звіти', monthly: '📊 Місячний звіт', alarm: '🚨 ТЕРМІНОВО', settings: '⚙️ Налаштування',
+  menu: '⬅️ Меню', cancel: '❌ Скасувати', skip: '➡️ Пропустити', done: '✅ Готово', noText: '➡️ Без тексту',
 };
 const came = (e) => `🟢 ${E.came(e)}`;
 const left = (e) => `🔴 ${E.left(e)}`;
 
 function employeeKb(e) {
-  return new Keyboard().text(came(e)).row().text(left(e)).row()
-    .text(B.stats).text(B.salary).row().text(B.sendReport).text(B.ai).resized().persistent();
+  return new Keyboard().text(came(e)).text(left(e)).row()
+    .text(B.stats).text(B.salary).row()
+    .text(B.cash).text(B.photo).row()
+    .text(B.problem).text(B.help).resized().persistent();
 }
 function adminKb(e) {
   return new Keyboard()
     .text(came(e)).text(left(e)).row()
-    .text(B.employees).text(B.working).row()
-    .text(B.history).text(B.payroll).row()
-    .text(B.advance).text(B.payout).row()
-    .text(B.fixShift).text(B.cashReport).row()
-    .text(B.viewReports).text(B.monthly).row()
-    .text(B.ai).text(B.alarm).row()
-    .text(B.settings).resized().persistent();
+    .text(B.panel).text(B.working).row()
+    .text(B.employees).text(B.history).row()
+    .text(B.payroll).text(B.advance).text(B.payout).row()
+    .text(B.fixShift).text(B.reports).row()
+    .text(B.cash).text(B.photo).row()
+    .text(B.problem).text(B.help).row()
+    .text(B.monthly).text(B.alarm).text(B.settings).resized().persistent();
 }
 const menuKb = (e) => (E.isAdmin(e) ? adminKb(e) : employeeKb(e));
 const cancelKb = () => new Keyboard().text(B.cancel).resized();
 const skipKb = () => new Keyboard().text(B.skip).text(B.cancel).resized();
-const aiKb = () => new Keyboard().text(B.exitAi).resized().persistent();
+const doneKb = () => new Keyboard().text(B.done).text(B.cancel).resized();
 
 const money = T.money;
 const chunk = (text, n = 3800) => { const out = []; let cur = ''; for (const line of text.split('\n')) { if ((cur + line).length > n) { out.push(cur); cur = ''; } cur += (cur ? '\n' : '') + line; } if (cur) out.push(cur); return out; };
+const CAT_BTN = { cash: B.cash, photo: B.photo, problem: B.problem };
 
 function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
   const bot = new Bot(token, botInfo ? { botInfo } : undefined);
-  // notify / ai / scheduler потребують bot.api, тому підставляються після створення бота (deps)
+  // notify / scheduler потребують bot.api, тому підставляються після створення бота (deps)
   const lazy = (k) => new Proxy({}, { get: (_, m) => deps[k][m] });
-  const notify = lazy('notify'); const ai = lazy('ai'); const scheduler = lazy('scheduler');
+  const notify = lazy('notify'); const scheduler = lazy('scheduler');
   bot.deps = deps;
   const flows = new Map(); // telegram_id → {name, step, data}
   const flow = (id) => flows.get(id);
@@ -81,6 +83,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
   const menu = (ctx, text = 'Головне меню') => say(ctx, text, menuKb(ctx.emp));
   const dropButtons = async (ctx) => { try { await ctx.editMessageReplyMarkup({ reply_markup: undefined }); } catch (_) { /* повідомлення могло бути змінене */ } };
   const nonce = () => crypto.randomBytes(4).toString('hex');
+  const now = () => new Date();
 
   // ---------- хто пише ----------
   bot.use(async (ctx, next) => {
@@ -97,22 +100,11 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
     const kb = !ctx.isPrivate && ctx.isAdmin ? new InlineKeyboard().text('✅ Зробити цю групу адмін-чатом', `st:group:${ctx.chat.id}`) : undefined;
     await ctx.reply(lines.join('\n'), { parse_mode: 'HTML', reply_markup: kb });
   });
-
   bot.command(['update', 'version'], async (ctx) => {
     if (!ctx.emp || !ctx.isAdmin) return;
     if (ctx.message.text.startsWith('/version')) { const v = deps.updater ? await deps.updater.version() : { text: 'dev' }; return ctx.reply(`Версія: ${v.text}`); }
     return doUpdate(ctx);
   });
-
-  bot.command('ai', async (ctx) => {
-    if (!ctx.emp || !ctx.isAdmin) return;
-    const q = (ctx.match || '').trim();
-    if (!q) return ctx.reply('Напишіть: /ai ваше запитання');
-    await ctx.replyWithChatAction('typing').catch(() => {});
-    const r = await ai.ask(ctx.emp, q, { chatKey: `chat:${ctx.chat.id}` });
-    await say(ctx, esc(r.text));
-  });
-
   bot.command('start', async (ctx) => {
     if (!ctx.isPrivate) return;
     const code = (ctx.match || '').trim();
@@ -129,9 +121,9 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
   });
 
   function helpText(e) {
-    const base = `<b>Як користуватись</b>\n${came(e)} — відмітити прихід вранці.\n${left(e)} — закрити зміну після роботи. Якщо забули — бот закриє її сам через ${config.autoCloseHours} год.\n${B.stats} — ваші зміни за місяць.\n${B.salary} — нараховано, аванси, виплати, залишок.\n${B.sendReport} — фото / PDF / Excel / текст звіту каси.\n${B.ai} — запитайте бота простими словами.`;
+    const base = `<b>Як користуватись</b>\n${came(e)} — відмітити прихід. ${left(e)} — закрити зміну; зарплата рахується до хвилини. Якщо забули — бот закриє зміну сам о ${config.autoCloseTime}.\n${B.stats} — ваші години за місяць.\n${B.salary} — нараховано, аванси, виплати, залишок.\n${B.cash} — сфотографуйте касу / звіт і надішліть. ${B.photo} — будь-який фото-звіт для власника.\n${B.problem} — щось зламалось або сталось: опис + фото/відео, власник отримує одразу.\n${B.help} — інструкції по Level Nine та Instasport.`;
     if (!E.isAdmin(e)) return base;
-    return base + `\n\n<b>Адміністратор</b>\n${B.employees} — ставки, прив'язка Telegram.\n${B.working} — хто зараз на зміні.\n${B.history} — останні зміни.\n${B.payroll} — по працівнику: нараховано / аванси / виплати / залишок.\n${B.advance} · ${B.payout} — операції з підтвердженням.\n${B.fixShift} — змінити час, закрити, видалити або додати зміну.\n${B.viewReports} — останні звіти або пошук за датою.\n${B.monthly} — підсумки місяця по всіх.\n${B.alarm} — негайне повідомлення власнику та в адмін-групу.\n${B.settings} — час щоденного звіту, адмін-група, резервна копія.`;
+    return base + `\n\n<b>Адміністратор</b>\n${B.panel} — усе на одному екрані: хто працює, години, зарплата, звіти, проблеми.\n${B.employees} — ставки, прив'язка Telegram.\n${B.payroll} — по працівнику; ${B.advance} · ${B.payout} — з підтвердженням.\n${B.fixShift} — змінити час, закрити, видалити або додати зміну.\n${B.reports} — звіти каси, фото-звіти, проблеми.\n${B.monthly} — підсумки місяця, Excel.\n${B.alarm} — негайне повідомлення власнику та в адмін-групу.\n${B.help} → ➕ додати інструкцію (текст + фото).`;
   }
 
   async function notLinked(ctx) {
@@ -142,7 +134,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
     if (!r.ok) return ctx.reply(`❌ ${r.reason}.`);
     ctx.emp = r.emp;
     await menu(ctx, `✅ Готово! Ви — <b>${esc(r.emp.name)}</b>. Оберіть дію кнопкою нижче.`);
-    await notify.toGroup(`🔗 ${esc(r.emp.name)} прив'язав(ла) Telegram (ID ${ctx.from.id})`);
+    await notify.event(`🔗 ${esc(r.emp.name)} прив'язав(ла) Telegram (ID ${ctx.from.id})`, { actorTgId: ctx.from.id });
   }
 
   // ---------- inline-кнопки ----------
@@ -166,7 +158,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       if (!admin) return;
       db.setting('admin_chat_id', b); db.audit(ctx.emp.id, 'settings.group', { chat: b });
       await dropButtons(ctx);
-      await ctx.reply('✅ Ця група тепер адмін-чат: сюди йтимуть приходи, звіти каси, підсумки й тривоги.');
+      await ctx.reply('✅ Ця група тепер адмін-чат: сюди йтимуть приходи, звіти, підсумки, проблеми й тривоги.');
       return;
     }
 
@@ -183,14 +175,14 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       }
       if (a === 'ok') {
         if (!f || f.name !== 'ledger' || f.step !== 'confirm' || f.data.nonce !== b) { await ctx.answerCallbackQuery({ text: 'Операцію вже виконано або скасовано', show_alert: true }); await dropButtons(ctx); return 'answered'; }
-        clearFlow(uid); // спершу знімаємо стан — повторний тап уже нічого не зробить
+        clearFlow(uid);
         await dropButtons(ctx);
         const r = P.addLedger(db, { emp_id: f.data.emp.id, type: f.type, amount: f.data.amount, comment: f.data.comment, admin_id: ctx.emp.id, idem_key: `led:${uid}:${b}` });
         if (!r.ok) return menu(ctx, `❌ ${r.reason}`);
         const label = f.type === 'advance' ? 'Аванс' : 'Виплату';
         const s = P.summary(db, f.data.emp, T.parts().month);
         await menu(ctx, `✅ ${label} <b>${money(f.data.amount)}</b> для <b>${esc(f.data.emp.name)}</b> записано.${f.data.comment ? `\nКоментар: ${esc(f.data.comment)}` : ''}\nЗалишок до виплати: <b>${money(s.balance)}</b>`);
-        await notify.toGroup(`${f.type === 'advance' ? '➕ Аванс' : '💸 Виплата'} ${money(f.data.amount)} — ${esc(f.data.emp.name)}${f.data.comment ? ` (${esc(f.data.comment)})` : ''}\nДодав(ла): ${esc(ctx.emp.name)}`);
+        await notify.event(`${f.type === 'advance' ? '➕ Аванс' : '💸 Виплата'} ${money(f.data.amount)} — ${esc(f.data.emp.name)}${f.data.comment ? ` (${esc(f.data.comment)})` : ''}\nДодав(ла): ${esc(ctx.emp.name)}`, { actorTgId: uid });
         return;
       }
       if (a === 'no') { clearFlow(uid); await dropButtons(ctx); await menu(ctx, 'Скасовано.'); return; }
@@ -208,30 +200,40 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       if (a === 'no') { clearFlow(uid); await dropButtons(ctx); await menu(ctx, 'Тривогу скасовано.'); return; }
     }
 
-    // --- звіти каси ---
+    // --- звіти ---
     if (k === 'rp') {
       const rep = R.byId(db, +b);
       if (!rep) { await ctx.answerCallbackQuery({ text: 'Звіт не знайдено' }); return 'answered'; }
       if (a === 'cm') {
         if (rep.telegram_id !== uid && !admin) return;
         setFlow(uid, { name: 'rpcomment', data: { id: rep.id } });
-        await say(ctx, `Коментар до звіту #${rep.id}:`, cancelKb());
+        await say(ctx, `Коментар до #${rep.id}:`, cancelKb());
         return;
       }
-      if (a === 'ai') {
-        if (!admin) { await ctx.answerCallbackQuery({ text: 'Лише для адміністратора' }); return 'answered'; }
-        await ctx.replyWithChatAction('typing').catch(() => {});
-        const attachment = (rep.kind === 'photo' || isImage(rep.mime, rep.file_name)) && rep.local_path ? { path: rep.local_path, mime: rep.mime || 'image/jpeg' } : null;
-        const r = await ai.ask(ctx.emp, `Проаналізуй касовий звіт #${rep.id}${rep.comment ? ` (коментар автора: ${rep.comment})` : ''}: що в ньому, які суми, чи є щось незвичне. Якщо дані нечитабельні — так і скажи.`, { attachment });
-        await say(ctx, esc(r.text));
+      if (a === 'cat') {
+        if (rep.telegram_id !== uid && !admin) return;
+        const cat = c; if (!R.CAT[cat]) return;
+        db.prepare('UPDATE reports SET category = ? WHERE id = ?').run(cat, rep.id);
+        await dropButtons(ctx);
+        await say(ctx, `✅ #${rep.id} тепер — ${R.CAT[cat]}.`);
+        if (cat === 'problem') await notify.event(`🚨 <b>Проблема #${rep.id}</b> від ${esc(rep.author)} · ${T.uaDateTime(rep.created_at)}${rep.comment ? `\n${esc(rep.comment)}` : ''}`, { actorTgId: uid });
+        return;
+      }
+      if (a === 'done') {
+        if (!admin) return;
+        R.setStatus(db, rep.id, rep.status === 'done' ? 'new' : 'done');
+        await dropButtons(ctx);
+        await say(ctx, rep.status === 'done' ? `↩️ Проблему #${rep.id} знову відкрито.` : `✅ Проблему #${rep.id} позначено вирішеною.`);
         return;
       }
     }
     if (k === 'rv') {
       if (!admin) return;
-      if (a === 'today') return listReports(ctx, R.onDate(db, T.parts().date), `Звіти за сьогодні (${T.uaDate(T.parts().date)})`);
-      if (a === 'recent') return listReports(ctx, R.recent(db, 10), 'Останні 10 звітів');
-      if (a === 'date') { setFlow(uid, { name: 'rvdate' }); await say(ctx, 'Введіть дату у форматі ДД.ММ.РРРР:', cancelKb()); return; }
+      const cat = c === 'all' ? null : c || null;
+      if (a === 'today') return listReports(ctx, R.onDate(db, T.parts().date, cat), `За сьогодні (${T.uaDate(T.parts().date)})`);
+      if (a === 'recent') return listReports(ctx, R.recent(db, 10, cat), 'Останні 10');
+      if (a === 'problems') return listReports(ctx, R.openProblems(db), 'Відкриті проблеми');
+      if (a === 'date') { setFlow(uid, { name: 'rvdate', data: { cat } }); await say(ctx, 'Введіть дату у форматі ДД.ММ.РРРР:', cancelKb()); return; }
     }
 
     // --- виправити зміну ---
@@ -255,11 +257,11 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
         return;
       }
       if (a === 'now') {
-        const r = S.edit(db, +b, { ended_at: T.iso(new Date()), note: 'закрито адміністратором' }, ctx.emp.id);
+        const r = S.edit(db, +b, { ended_at: T.iso(now()), note: 'закрито адміністратором' }, ctx.emp.id);
         await dropButtons(ctx);
         if (!r.ok) return say(ctx, `❌ ${r.reason}`);
         await say(ctx, `✅ Зміну закрито: ${esc(S.line(r.shift))}`);
-        await notify.toGroup(`📝 ${esc(ctx.emp.name)} закрив(ла) зміну ${esc(r.shift.name)}: ${esc(S.line(r.shift))}`);
+        await notify.event(`📝 ${esc(ctx.emp.name)} закрив(ла) зміну ${esc(r.shift.name)}: ${esc(S.line(r.shift))}`, { actorTgId: uid });
         return;
       }
       if (a === 'del') {
@@ -272,7 +274,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
         await dropButtons(ctx);
         if (!r.ok) return say(ctx, `❌ ${r.reason}`);
         await say(ctx, `🗑 Зміну видалено: ${esc(r.shift.name)} ${esc(S.line(r.shift))}`);
-        await notify.toGroup(`📝 ${esc(ctx.emp.name)} видалив(ла) зміну ${esc(r.shift.name)}: ${esc(S.line(r.shift))}`);
+        await notify.event(`📝 ${esc(ctx.emp.name)} видалив(ла) зміну ${esc(r.shift.name)}: ${esc(S.line(r.shift))}`, { actorTgId: uid });
         return;
       }
       if (a === 'cancel') { await dropButtons(ctx); return; }
@@ -293,7 +295,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
         f.data.pay_type = b; await dropButtons(ctx);
         if (b === 'none') { f.data.rate = 0; f.step = 'g'; await say(ctx, 'Як підписати кнопки?', new InlineKeyboard().text('Прийшла / Пішла', 'em:g:f').text('Прийшов / Пішов', 'em:g:m')); return; }
         f.step = 'rate';
-        await say(ctx, b === 'daily' ? 'Ставка за робочий день, грн:' : 'Ставка за місяць, грн:', cancelKb());
+        await say(ctx, b === 'hourly' ? 'Ставка за годину, грн:' : b === 'daily' ? 'Ставка за робочий день, грн:' : 'Ставка за місяць, грн:', cancelKb());
         return;
       }
       if (a === 'g') {
@@ -322,7 +324,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
         clearFlow(uid); await dropButtons(ctx);
         E.setRate(db, emp.id, f.data.rate, ctx.emp.id);
         await say(ctx, `✅ Ставку ${esc(emp.name)} змінено: ${E.payText(E.byId(db, emp.id))}.`);
-        await notify.toGroup(`⚙️ ${esc(ctx.emp.name)} змінив(ла) ставку ${esc(emp.name)}: ${E.payText(E.byId(db, emp.id))}`);
+        await notify.event(`⚙️ ${esc(ctx.emp.name)} змінив(ла) ставку ${esc(emp.name)}: ${E.payText(E.byId(db, emp.id))}`, { actorTgId: uid });
         return;
       }
       if (a === 'adm') {
@@ -356,11 +358,24 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       if (!admin) return;
       if (a === 'x') {
         const { monthXlsx } = require('./export');
-        const f = monthXlsx(db, b, T.parts().month);
-        await ctx.replyWithDocument(new InputFile(f.buffer, f.name), { caption: `📥 Звіт за ${T.uaMonth(b)}: підсумок, зміни, аванси й виплати, звіти каси` });
+        const fx = monthXlsx(db, b, T.parts().month);
+        await ctx.replyWithDocument(new InputFile(fx.buffer, fx.name), { caption: `📥 Звіт за ${T.uaMonth(b)}: підсумок, зміни з годинами, аванси й виплати, звіти` });
         return;
       }
       return showMonthly(ctx, a);
+    }
+
+    // --- допомога ---
+    if (k === 'hp') {
+      if (a === 'sec') return showSection(ctx, decodeURIComponent(b));
+      if (a === 'art') return showArticle(ctx, +b);
+      if (a === 'root') return showHelpRoot(ctx);
+      if (!admin) return;
+      if (a === 'add') { setFlow(uid, { name: 'hpadd', step: 'section', data: { section: b ? decodeURIComponent(b) : null, media: [] } }); if (b) { flow(uid).step = 'title'; await say(ctx, `Розділ: <b>${esc(decodeURIComponent(b))}</b>\nНазва інструкції:`, cancelKb()); } else await say(ctx, 'Розділ (наприклад, Instasport або Level Nine):', new Keyboard().text('Level Nine').text('Instasport').row().text(B.cancel).resized()); return; }
+      if (a === 'edit') { setFlow(uid, { name: 'hpedit', data: { id: +b } }); await say(ctx, 'Новий текст інструкції:', cancelKb()); return; }
+      if (a === 'media') { setFlow(uid, { name: 'hpmedia', data: { id: +b } }); await say(ctx, 'Надішліть фото або відео (можна кілька), потім «Готово»:', doneKb()); return; }
+      if (a === 'del') { await say(ctx, `Видалити інструкцію #${b}?`, new InlineKeyboard().text('🗑 Так', `hp:delok:${b}`).text('❌ Ні', 'fx:cancel')); return; }
+      if (a === 'delok') { const art = H.byId(db, +b); H.remove(db, +b, ctx.emp.id); await dropButtons(ctx); await say(ctx, `🗑 Видалено${art ? ': ' + esc(art.title) : ''}.`); return; }
     }
 
     // --- налаштування ---
@@ -370,7 +385,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       if (a === 'late') {
         const on = db.setting('late_alert') !== '0';
         db.setting('late_alert', on ? '0' : '1');
-        await say(ctx, on ? '🔕 Нагадування «не відмітились» вимкнено.' : '🔔 Нагадування «не відмітились» увімкнено: через годину після відкриття залу в групу.');
+        await say(ctx, on ? '🔕 Нагадування «не відмітились» вимкнено.' : '🔔 Нагадування «не відмітились» увімкнено: через годину після відкриття залу.');
         return;
       }
       if (a === 'time') { setFlow(uid, { name: 'sttime' }); await say(ctx, `Час щоденного підсумку (зараз ${scheduler.reportTime()}). Введіть ГГ:ХХ:`, cancelKb()); return; }
@@ -403,7 +418,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       `Оплата: ${E.payText(emp)}`,
       `Telegram: ${emp.telegram_id ? `прив'язано (ID ${emp.telegram_id})` : '❌ не прив\'язано'}`,
     ];
-    if (emp.pay_type !== 'none') lines.push(`${T.uaMonth(p)}: ${s.days != null ? `${s.days} дн · ` : ''}нараховано ${money(s.accrued)}, аванси ${money(s.advances)}, виплати ${money(s.payouts)}`, `Залишок до виплати: <b>${money(s.balance)}</b>`);
+    if (emp.pay_type !== 'none') lines.push(`${T.uaMonth(p)}: ${s.hours ? `${s.hours} · ` : s.days != null ? `${s.days} дн · ` : ''}нараховано ${money(s.accrued)}, аванси ${money(s.advances)}, виплати ${money(s.payouts)}`, `Залишок до виплати: <b>${money(s.balance)}</b>`);
     await say(ctx, lines.join('\n'), kb);
   }
   async function showSalary(ctx, id, month) {
@@ -416,6 +431,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
     return [
       `<b>${esc(emp.name)}</b> — ${T.uaMonth(s.month)}`,
       `Оплата: ${E.payText(emp)}`,
+      s.hours ? `Відпрацьовано: <b>${s.hours}</b>` : null,
       s.days != null ? `Робочих днів: <b>${s.days}</b>` : null,
       `Нараховано за місяць: <b>${money(s.accrued)}</b>`,
       `Аванси за місяць: ${money(s.advances)}`,
@@ -427,12 +443,72 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
   async function showMonthly(ctx, month) {
     const rep = P.monthlyReport(db, month, T.parts().month);
     const lines = [`📊 <b>Місячний звіт — ${T.uaMonth(month)}</b>`];
-    for (const r of rep.rows) lines.push(`\n<b>${esc(r.emp.name)}</b> (${E.payText(r.emp)})${r.days != null ? ` · ${r.days} дн` : ''}\n  нараховано ${money(r.accrued)} · аванси ${money(r.advances)} · виплати ${money(r.payouts)}\n  залишок: <b>${money(r.balance)}</b>`);
-    lines.push(`\n<b>Разом:</b> нараховано ${money(rep.total.accrued)} · аванси ${money(rep.total.advances)} · виплати ${money(rep.total.payouts)} · залишок ${money(rep.total.balance)}`);
-    const reps = R.between(db, `${month}-01`, `${month}-31`);
-    lines.push(`Звітів каси за місяць: ${reps.length}`);
+    for (const r of rep.rows) lines.push(`\n<b>${esc(r.emp.name)}</b> (${E.payText(r.emp)})${r.hours ? ` · ${r.hours}` : r.days != null ? ` · ${r.days} дн` : ''}\n  нараховано ${money(r.accrued)} · аванси ${money(r.advances)} · виплати ${money(r.payouts)}\n  залишок: <b>${money(r.balance)}</b>`);
+    lines.push(`\n<b>Разом:</b> ${T.hoursText(rep.total.minutes)} · нараховано ${money(rep.total.accrued)} · аванси ${money(rep.total.advances)} · виплати ${money(rep.total.payouts)} · залишок ${money(rep.total.balance)}`);
+    lines.push(`Звітів каси: ${R.between(db, `${month}-01`, `${month}-31`, 'cash').length} · фото-звітів: ${R.between(db, `${month}-01`, `${month}-31`, 'photo').length} · проблем: ${R.between(db, `${month}-01`, `${month}-31`, 'problem').length}`);
     const kb = new InlineKeyboard().text('◀️', `mr:${T.addMonths(month, -1)}`).text('📥 Excel', `mr:x:${month}`).text('▶️', `mr:${T.addMonths(month, 1)}`);
     await say(ctx, lines.join('\n'), kb);
+  }
+  async function showPanel(ctx) {
+    const p = T.parts(); const n = now();
+    const working = S.working(db).map((s) => { const e = E.byId(db, s.emp_id); const min = P.shiftMinutes(s, n); return `• ${esc(s.name)} — з ${T.uaTime(s.started_at)} · ${T.hoursText(min)}${e.pay_type === 'hourly' ? ` · ${money(P.payFor(e, min))}` : ''}`; });
+    const ds = P.dayStats(db, p.date, n);
+    const today = ds.rows.map((r) => `• ${esc(r.emp.name)} — ${T.hoursText(r.minutes)} · ${money(r.accrued)}`);
+    const rep = P.monthlyReport(db, p.month, p.month, n);
+    const monthRows = rep.rows.map((r) => `• ${esc(r.emp.name)} — ${r.hours || (r.days != null ? r.days + ' дн' : '')} · нараховано ${money(r.accrued)} · аванси ${money(r.advances)} · виплати ${money(r.payouts)} · <b>залишок ${money(r.balance)}</b>`);
+    const cash = R.onDate(db, p.date, 'cash'); const photos = R.onDate(db, p.date, 'photo'); const problems = R.openProblems(db);
+    const lines = [
+      `👑 <b>Панель власника</b> · ${T.uaDate(p.date)} ${p.time}`,
+      `\n<b>Зараз працюють:</b>\n${working.join('\n') || '— ніхто'}`,
+      `\n<b>Сьогодні:</b>\n${today.join('\n') || '— ще нікого не було'}\nРазом за день: ${money(ds.accrued)}`,
+      `\n<b>${T.uaMonth(p.month)}:</b>\n${monthRows.join('\n') || '— немає працівників із зарплатою'}\nРазом: ${T.hoursText(rep.total.minutes)} · нараховано ${money(rep.total.accrued)} · до виплати ${money(rep.total.balance)}`,
+      `\n<b>Звіти сьогодні:</b> каса ${cash.length} · фото ${photos.length}`,
+      `<b>Відкриті проблеми:</b> ${problems.length}${problems.length ? '\n' + problems.slice(0, 5).map((r) => '• ' + esc(R.line(r))).join('\n') : ''}`,
+    ];
+    const kb = new InlineKeyboard().text('📁 Звіти за сьогодні', 'rv:today:all').text('⚠️ Проблеми', 'rv:problems').row().text('📊 Місячний звіт', `mr:${p.month}`).text('📅 Історія змін', 'hs:all');
+    await say(ctx, lines.join('\n'), kb);
+  }
+  async function listReports(ctx, rows, title) {
+    if (!rows.length) return say(ctx, `${esc(title)}: нічого немає.`);
+    await say(ctx, `<b>${esc(title)}</b> — ${rows.length}`);
+    for (const r of rows.slice(0, 10)) {
+      const caption = esc(R.line(r));
+      const kb = new InlineKeyboard();
+      if (r.category === 'problem') kb.text(r.status === 'done' ? '↩️ Відкрити знову' : '✅ Вирішено', `rp:done:${r.id}`);
+      else kb.text('💬 Коментар', `rp:cm:${r.id}`);
+      try {
+        if (r.kind === 'photo') await ctx.replyWithPhoto(r.file_id, { caption, reply_markup: kb });
+        else if (r.kind === 'video') await ctx.replyWithVideo(r.file_id, { caption, reply_markup: kb });
+        else if (r.kind === 'document') await ctx.replyWithDocument(r.file_id, { caption, reply_markup: kb });
+        else await say(ctx, caption, kb);
+      } catch (e) { await say(ctx, `${caption}\n(файл недоступний: ${esc(e.message)})`); }
+    }
+  }
+  async function showHelpRoot(ctx) {
+    const secs = H.sections(db);
+    const kb = new InlineKeyboard();
+    for (const s of secs) kb.text(`${s.section} (${s.n})`, `hp:sec:${encodeURIComponent(s.section)}`).row();
+    if (ctx.isAdmin) kb.text('➕ Додати інструкцію', 'hp:add');
+    await say(ctx, `🆘 <b>Допомога</b>\n${secs.length ? 'Оберіть розділ:' : 'Інструкцій ще немає.' + (ctx.isAdmin ? ' Додайте першу кнопкою нижче: назва, текст, скріншоти.' : ' Попросіть адміністратора додати.')}`, kb);
+  }
+  async function showSection(ctx, section) {
+    const arts = H.list(db, section);
+    const kb = new InlineKeyboard();
+    for (const a of arts) kb.text(a.title, `hp:art:${a.id}`).row();
+    if (ctx.isAdmin) kb.text('➕ Додати сюди', `hp:add:${encodeURIComponent(section)}`).row();
+    kb.text('⬅️ Розділи', 'hp:root');
+    await say(ctx, `📂 <b>${esc(section)}</b>\n${arts.length ? 'Оберіть інструкцію:' : 'Порожньо.'}`, kb);
+  }
+  async function showArticle(ctx, id) {
+    const a = H.byId(db, id); if (!a) return say(ctx, 'Інструкцію не знайдено.');
+    const media = H.media(a);
+    for (const m of media) {
+      try { if (m.kind === 'video') await ctx.replyWithVideo(m.file_id); else await ctx.replyWithPhoto(m.file_id); } catch (e) { console.error('help media', e.message); }
+    }
+    const kb = new InlineKeyboard();
+    if (ctx.isAdmin) kb.text('✏️ Текст', `hp:edit:${a.id}`).text('🖼 Додати фото', `hp:media:${a.id}`).text('🗑', `hp:del:${a.id}`).row();
+    kb.text(`⬅️ ${a.section}`, `hp:sec:${encodeURIComponent(a.section)}`);
+    await say(ctx, `📘 <b>${esc(a.title)}</b>\n${esc(a.body || '')}`, kb);
   }
   async function doUpdate(ctx) {
     if (!deps.updater) return say(ctx, 'Оновлення недоступні в цьому запуску.');
@@ -446,98 +522,88 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
     await notify.toGroup(`🔄 Бот оновлено ${r.from} → ${r.to}${r.deps ? ' (оновлено залежності)' : ''}. Перезапуск.`);
     setTimeout(() => (deps.restart || (() => process.exit(0)))(), 800);
   }
-  async function listReports(ctx, rows, title) {
-    if (!rows.length) return say(ctx, `${esc(title)}: звітів немає.`);
-    await say(ctx, `<b>${esc(title)}</b> — ${rows.length}`);
-    for (const r of rows.slice(0, 10)) {
-      const caption = esc(R.line(r));
-      const kb = new InlineKeyboard().text('🤖 Аналізувати', `rp:ai:${r.id}`);
-      try {
-        if (r.kind === 'photo') await ctx.replyWithPhoto(r.file_id, { caption, reply_markup: kb });
-        else if (r.kind === 'document') await ctx.replyWithDocument(r.file_id, { caption, reply_markup: kb });
-        else await say(ctx, `${caption}\n${esc(r.comment || '')}`, kb);
-      } catch (e) { await say(ctx, `${caption}\n(файл недоступний: ${esc(e.message)})`); }
-    }
-  }
 
   // ---------- відмітки ----------
   async function doStart(ctx) {
-    const r = S.start(db, ctx.emp, new Date());
-    if (r.dup) return menu(ctx, `Зміна вже відкрита з ${T.uaTime(r.shift.started_at)}. Щоб закрити — натисніть «${left(ctx.emp)}».`);
+    const r = S.start(db, ctx.emp, now());
+    if (r.dup) return menu(ctx, `Зміна вже відкрита з ${T.uaTime(r.shift.started_at)} (${T.hoursText(P.shiftMinutes(r.shift, now()))}). Щоб закрити — натисніть «${left(ctx.emp)}».`);
     const t = T.uaTime(r.shift.started_at);
-    await menu(ctx, `✅ Прихід відмічено: <b>${t}</b>${r.outside ? '\n⚠️ Це поза графіком (' + S.scheduleText() + '). Час збережено, адміністратора повідомлено.' : ''}`);
-    await notify.toGroup(`${r.outside ? '⚠️ Поза графіком · ' : ''}🟢 <b>${esc(ctx.emp.name)}</b> ${E.came(ctx.emp).toLowerCase()} ${t}`);
+    await menu(ctx, `✅ Прихід відмічено: <b>${t}</b>${r.outside ? '\n⚠️ Це поза графіком (' + S.scheduleText() + '). Час збережено, власника повідомлено.' : ''}`);
+    await notify.event(`${r.outside ? '⚠️ Поза графіком · ' : ''}🟢 <b>${esc(ctx.emp.name)}</b> ${E.came(ctx.emp).toLowerCase()} ${t}`, { actorTgId: ctx.from.id });
   }
   async function doEnd(ctx) {
-    const r = S.end(db, ctx.emp, new Date());
+    const r = S.end(db, ctx.emp, now());
     if (r.none) return menu(ctx, `Відкритої зміни немає. Спершу натисніть «${came(ctx.emp)}».`);
-    const t = T.uaTime(r.shift.ended_at);
-    await menu(ctx, `✅ Зміну закрито: <b>${T.uaTime(r.shift.started_at)}–${t}</b> (${T.durText(r.shift.started_at, r.shift.ended_at)})${r.outside ? '\n⚠️ Це поза графіком. Час збережено, адміністратора повідомлено.' : ''}`);
-    await notify.toGroup(`${r.outside ? '⚠️ Поза графіком · ' : ''}🔴 <b>${esc(ctx.emp.name)}</b> ${E.left(ctx.emp).toLowerCase()} ${t} · ${T.durText(r.shift.started_at, r.shift.ended_at)}`);
+    const t = T.uaTime(r.shift.ended_at); const min = P.shiftMinutes(r.shift);
+    const pay = ctx.emp.pay_type === 'hourly' ? ` · ${money(P.payFor(ctx.emp, min))}` : '';
+    await menu(ctx, `✅ Зміну закрито: <b>${T.uaTime(r.shift.started_at)}–${t}</b> · ${T.hoursText(min)}${pay}${r.outside ? '\n⚠️ Це поза графіком. Час збережено, власника повідомлено.' : ''}`);
+    await notify.event(`${r.outside ? '⚠️ Поза графіком · ' : ''}🔴 <b>${esc(ctx.emp.name)}</b> ${E.left(ctx.emp).toLowerCase()} ${t} · ${T.hoursText(min)}${pay}`, { actorTgId: ctx.from.id });
   }
   async function myStats(ctx) {
     const p = T.parts(); const emp = ctx.emp;
     const rows = S.forEmployee(db, emp.id, `${p.month}-01`, `${p.month}-31`);
     const open = S.openShiftOf(db, emp.id);
-    await menu(ctx, `<b>${esc(emp.name)} — ${T.uaMonth(p.month)}</b>\nРобочих днів: <b>${P.paidDays(db, emp.id, p.month)}</b>${open ? `\nЗараз на зміні з ${T.uaTime(open.started_at)}` : ''}\n\n${rows.map((s) => '• ' + esc(S.line(s))).join('\n') || 'Змін цього місяця ще немає.'}`);
+    const min = P.minutesMonth(db, emp.id, p.month, now());
+    await menu(ctx, `<b>${esc(emp.name)} — ${T.uaMonth(p.month)}</b>\nВідпрацьовано: <b>${T.hoursText(min)}</b>${emp.pay_type === 'hourly' ? ` · ${money(P.payFor(emp, min))}` : ''}${open ? `\nЗараз на зміні з ${T.uaTime(open.started_at)} (${T.hoursText(P.shiftMinutes(open, now()))})` : ''}\n\n${rows.map((s) => '• ' + esc(S.line(s))).join('\n') || 'Змін цього місяця ще немає.'}`);
   }
   async function mySalary(ctx) {
     const emp = ctx.emp;
-    if (emp.pay_type === 'none') return menu(ctx, 'У власника зарплата 0 грн — облік не ведеться.');
+    if (emp.pay_type === 'none') return menu(ctx, 'Для вашого акаунта зарплата не ведеться.');
     const s = P.summary(db, emp, T.parts().month);
     const hist = P.history(db, emp.id, 5);
     await menu(ctx, salaryText(emp, s) + (hist.length ? `\n\n<b>Останні операції</b>\n${hist.map((l) => '• ' + esc(P.ledgerLine(l))).join('\n')}` : ''));
   }
 
-  // ---------- файли = звіт каси ----------
-  async function saveReport(ctx, { kind, file_id, file_unique_id, file_name, mime, size, text }) {
+  // ---------- файли ----------
+  function mediaOf(msg) {
+    if (msg.photo) { const ph = msg.photo[msg.photo.length - 1]; return { kind: 'photo', file_id: ph.file_id, file_unique_id: ph.file_unique_id, mime: 'image/jpeg', size: ph.file_size, file_name: null }; }
+    if (msg.video) return { kind: 'video', file_id: msg.video.file_id, file_unique_id: msg.video.file_unique_id, mime: msg.video.mime_type || 'video/mp4', size: msg.video.file_size, file_name: msg.video.file_name || null };
+    if (msg.document) return { kind: 'document', file_id: msg.document.file_id, file_unique_id: msg.document.file_unique_id, mime: msg.document.mime_type, size: msg.document.file_size, file_name: msg.document.file_name };
+    return null;
+  }
+  async function saveReport(ctx, category, media, text) {
     const p = T.parts();
     let local_path = null;
-    if (file_id && (!size || size <= config.maxDownloadBytes)) {
-      const safe = (file_name || `${kind}.jpg`).replace(/[^\w.\-Ѐ-ӿ]+/g, '_');
-      const dest = path.join(config.dataDir, 'reports', p.date, `${file_unique_id || Date.now()}-${safe}`);
-      try { local_path = await dl(file_id, dest); } catch (e) { console.error('download', e.message); }
+    if (media && media.file_id && (!media.size || media.size <= config.maxDownloadBytes)) {
+      const safe = (media.file_name || `${media.kind}.${media.kind === 'video' ? 'mp4' : 'jpg'}`).replace(/[^\w.\-Ѐ-ӿ]+/g, '_');
+      const dest = path.join(config.dataDir, 'reports', p.date, `${media.file_unique_id || Date.now()}-${safe}`);
+      try { local_path = await dl(media.file_id, dest); } catch (e) { console.error('download', e.message); }
     }
-    const rep = R.add(db, { emp_id: ctx.emp.id, telegram_id: ctx.from.id, author: ctx.emp.name, date: p.date, kind, file_id, file_unique_id, file_name, mime, size, local_path, comment: text || ctx.message.caption || null });
-    const kb = new InlineKeyboard().text('💬 Додати коментар', `rp:cm:${rep.id}`);
-    if (ctx.isAdmin) kb.text('🤖 Аналізувати', `rp:ai:${rep.id}`);
-    await say(ctx, `✅ Звіт каси <b>#${rep.id}</b> збережено\n${T.uaDateTime(rep.created_at)} · ${esc(rep.author)}${rep.comment ? `\nКоментар: ${esc(rep.comment)}` : ''}${file_id && !local_path && size > config.maxDownloadBytes ? '\n⚠️ Файл більший за 20 МБ — збережено лише посилання в Telegram.' : ''}`, kb);
-    await menu(ctx, 'Дякую! Можна надіслати ще один файл або повернутись до меню.');
-    const fwd = await notify.toGroup(`📸 Звіт каси #${rep.id} від ${esc(rep.author)} · ${T.uaDateTime(rep.created_at)}${rep.comment ? `\n${esc(rep.comment)}` : ''}`);
-    if (fwd.ok && file_id) {
-      try { if (kind === 'photo') await bot.api.sendPhoto(notify.groupId() || notify.ownerId(), file_id); else await bot.api.sendDocument(notify.groupId() || notify.ownerId(), file_id); } catch (_) { /* файл уже є в базі */ }
-    }
+    const rep = R.add(db, { emp_id: ctx.emp.id, telegram_id: ctx.from.id, author: ctx.emp.name, date: p.date, category, kind: media ? media.kind : 'text', file_id: media && media.file_id, file_unique_id: media && media.file_unique_id, file_name: media && media.file_name, mime: media && media.mime, size: media && media.size, local_path, comment: text || (ctx.message && ctx.message.caption) || null });
+    const kb = new InlineKeyboard().text('💬 Коментар', `rp:cm:${rep.id}`).row();
+    for (const [cat, label] of Object.entries(R.CAT)) if (cat !== category) kb.text(`Це ${label}`, `rp:cat:${rep.id}:${cat}`);
+    const big = media && media.size > config.maxDownloadBytes;
+    await say(ctx, `✅ ${R.CAT[category]} <b>#${rep.id}</b> збережено\n${T.uaDateTime(rep.created_at)} · ${esc(rep.author)}${rep.comment ? `\n${esc(rep.comment)}` : ''}${big ? '\n⚠️ Файл більший за 20 МБ — збережено лише посилання в Telegram.' : ''}`, kb);
+    const head = category === 'problem' ? `🚨 <b>ПРОБЛЕМА #${rep.id}</b>` : `${R.CAT[category]} #${rep.id}`;
+    await notify.event(`${head} від ${esc(rep.author)} · ${T.uaDateTime(rep.created_at)}${rep.comment ? `\n${esc(rep.comment)}` : ''}`, { actorTgId: ctx.from.id });
+    if (media) await notify.eventMedia(media.kind, media.file_id, `${R.CAT[category]} #${rep.id} · ${rep.author}`, { actorTgId: ctx.from.id });
     return rep;
   }
 
-  bot.on(['message:photo', 'message:document'], async (ctx) => {
+  bot.on(['message:photo', 'message:video', 'message:document'], async (ctx) => {
     if (!ctx.isPrivate) return;
     if (!ctx.emp) return notLinked(ctx);
     const f = flow(ctx.from.id);
-    if (f && f.name === 'ai') {
-      // фото в режимі AI = питання з фото
-      const ph = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length - 1] : null;
-      const doc = ctx.message.document;
-      const fileId = ph ? ph.file_id : doc.file_id;
-      const dest = path.join(config.dataDir, 'tmp', `${Date.now()}-${(doc && doc.file_name) || 'photo.jpg'}`);
-      let local = null; try { local = await dl(fileId, dest); } catch (_) { /* без файлу */ }
-      const mime = ph ? 'image/jpeg' : doc.mime_type;
-      await ctx.replyWithChatAction('typing').catch(() => {});
-      let q = ctx.message.caption || 'Що на цьому зображенні / у цьому документі?';
-      let attachment = null;
-      if (local && isImage(mime, doc && doc.file_name)) attachment = { path: local, mime };
-      else if (local) { const { extractText } = require('./extract'); const txt = await extractText(local, mime, doc && doc.file_name); q += txt ? `\n\nВміст документа:\n${txt}` : '\n\n(Документ не вдалося прочитати як текст.)'; }
-      const r = await ai.ask(ctx.emp, q, { attachment });
-      if (local) fs.rm(local, () => {});
-      return say(ctx, esc(r.text), aiKb());
+    const media = mediaOf(ctx.message);
+    if (f && f.name === 'hpmedia') {
+      if (media.kind === 'document') return say(ctx, 'Для інструкцій потрібне фото або відео.', doneKb());
+      H.addMedia(db, f.data.id, { kind: media.kind, file_id: media.file_id }, ctx.emp.id);
+      return say(ctx, `🖼 Додано (${H.media(H.byId(db, f.data.id)).length}). Ще, або «Готово».`, doneKb());
     }
+    if (f && f.name === 'hpadd' && f.step === 'media') {
+      if (media.kind === 'document') return say(ctx, 'Для інструкцій потрібне фото або відео.', doneKb());
+      f.data.media.push({ kind: media.kind, file_id: media.file_id });
+      return say(ctx, `🖼 Додано (${f.data.media.length}). Ще, або «Готово».`, doneKb());
+    }
+    if (f && f.name === 'problem') {
+      clearFlow(ctx.from.id);
+      const rep = await saveReport(ctx, 'problem', media, f.data.text);
+      return menu(ctx, `Дякую, власника повідомлено про проблему #${rep.id}.`);
+    }
+    const category = f && f.name === 'report' ? f.data.category : 'photo';
     clearFlow(ctx.from.id);
-    if (ctx.message.photo) {
-      const ph = ctx.message.photo[ctx.message.photo.length - 1];
-      return saveReport(ctx, { kind: 'photo', file_id: ph.file_id, file_unique_id: ph.file_unique_id, mime: 'image/jpeg', size: ph.file_size });
-    }
-    const doc = ctx.message.document;
-    return saveReport(ctx, { kind: 'document', file_id: doc.file_id, file_unique_id: doc.file_unique_id, file_name: doc.file_name, mime: doc.mime_type, size: doc.file_size });
+    await saveReport(ctx, category, media);
+    return menu(ctx, category === 'cash' ? 'Дякую! Звіт каси передано власнику.' : 'Дякую! Якщо це був звіт каси або проблема — натисніть відповідну кнопку під повідомленням.');
   });
 
   // ---------- текст: кнопки та кроки діалогів ----------
@@ -550,9 +616,9 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       return notLinked(ctx);
     }
     let f = flow(uid);
-    if (text === B.cancel || text === B.menu || text === B.exitAi) { clearFlow(uid); return menu(ctx, text === B.exitAi ? 'Режим AI вимкнено.' : 'Скасовано.'); }
+    if (text === B.cancel || text === B.menu) { clearFlow(uid); return menu(ctx, 'Скасовано.'); }
     const isButton = Object.values(B).includes(text) || text === came(ctx.emp) || text === left(ctx.emp);
-    if (f && f.name !== 'ai' && isButton && text !== B.skip && text !== B.noText) { clearFlow(uid); f = null; }
+    if (f && isButton && ![B.skip, B.noText, B.done].includes(text)) { clearFlow(uid); f = null; }
     if (f) return onFlowText(ctx, f, text);
 
     const e = ctx.emp;
@@ -560,19 +626,21 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
     if (text === left(e)) return doEnd(ctx);
     if (text === B.stats) return myStats(ctx);
     if (text === B.salary) return mySalary(ctx);
-    if (text === B.sendReport || text === B.cashReport) {
-      setFlow(uid, { name: 'report' });
-      return say(ctx, 'Надішліть фото касового звіту, PDF, Excel або просто текст. Підпис до файлу стане коментарем.', cancelKb());
+    if (text === B.cash || text === B.photo) {
+      setFlow(uid, { name: 'report', data: { category: text === B.cash ? 'cash' : 'photo' } });
+      return say(ctx, text === B.cash ? 'Сфотографуйте касу / касовий звіт і надішліть фото (можна кілька, по одному). Підпис до фото стане коментарем.' : 'Надішліть фото або відео. Підпис стане коментарем.', cancelKb());
     }
-    if (text === B.ai) {
-      setFlow(uid, { name: 'ai' }); ai.reset(uid);
-      return say(ctx, '🤖 Запитайте що завгодно про бота, зміни, зарплату або звіти. Я лише читаю дані — змінити щось можна тільки кнопками адміністратора.', aiKb());
+    if (text === B.problem) {
+      setFlow(uid, { name: 'problem', step: 'text', data: {} });
+      return say(ctx, '⚠️ Опишіть проблему одним повідомленням (що і де сталося):', cancelKb());
     }
+    if (text === B.help) return showHelpRoot(ctx);
     if (!ctx.isAdmin) return menu(ctx, 'Оберіть дію кнопкою нижче.');
 
+    if (text === B.panel) return showPanel(ctx);
     if (text === B.working) {
       const rows = S.working(db);
-      return menu(ctx, `<b>Зараз працюють</b>\n${rows.map((s) => `• ${esc(s.name)} — з ${T.uaTime(s.started_at)} (${T.durText(s.started_at, new Date())})`).join('\n') || '— ніхто'}`);
+      return menu(ctx, `<b>Зараз працюють</b>\n${rows.map((s) => { const emp = E.byId(db, s.emp_id); const min = P.shiftMinutes(s, now()); return `• ${esc(s.name)} — з ${T.uaTime(s.started_at)} · ${T.hoursText(min)}${emp.pay_type === 'hourly' ? ` · ${money(P.payFor(emp, min))}` : ''}`; }).join('\n') || '— ніхто'}`);
     }
     if (text === B.employees) {
       const kb = new InlineKeyboard();
@@ -603,8 +671,12 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       for (const emp of E.list(db)) kb.text(emp.name, `fx:emp:${emp.id}`).row();
       return say(ctx, '<b>Виправити зміну</b> — чию?', kb);
     }
-    if (text === B.viewReports) {
-      return say(ctx, '<b>Звіти каси</b>', new InlineKeyboard().text('📅 Сьогодні', 'rv:today').text('🕘 Останні 10', 'rv:recent').row().text('🔎 За датою', 'rv:date'));
+    if (text === B.reports) {
+      return say(ctx, '<b>📁 Звіти</b>', new InlineKeyboard()
+        .text('💵 Каса · сьогодні', 'rv:today:cash').text('💵 Каса · останні', 'rv:recent:cash').row()
+        .text('📷 Фото · сьогодні', 'rv:today:photo').text('📷 Фото · останні', 'rv:recent:photo').row()
+        .text('⚠️ Відкриті проблеми', 'rv:problems').text('⚠️ Проблеми · останні', 'rv:recent:problem').row()
+        .text('🔎 Усе за датою', 'rv:date:all'));
     }
     if (text === B.monthly) return showMonthly(ctx, T.parts().month);
     if (text === B.alarm) {
@@ -612,20 +684,18 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       return say(ctx, '🚨 <b>Надіслати термінове повідомлення власнику та в адмін-чат?</b>', new InlineKeyboard().text('🚨 Так, надіслати', 'al:yes').text('❌ Ні', 'al:no'));
     }
     if (text === B.settings) {
-      const u = ai.usage();
       const g = notify.groupId();
       const ver = deps.updater ? await deps.updater.version() : null;
       const lines = [
         '<b>⚙️ Налаштування</b>',
         ver ? `Версія: ${esc(ver.text)}${ver.subject ? ` — ${esc(ver.subject)}` : ''}` : null,
-        `Нагадування «не відмітились»: ${db.setting('late_alert') !== '0' ? 'увімкнено (через 1 год після відкриття)' : 'вимкнено'}`,
         `Адмін-група: ${g ? `підключено (ID ${g})` : "❌ не підключено — додайте бота в групу і надішліть там /chatid"}`,
         `Власник: ${notify.ownerId() ? `ID ${notify.ownerId()}` : '❌ не прив\'язано'}`,
         `Щоденний підсумок: ${scheduler.reportTime()} (Київ)`,
+        `Автозакриття зміни: о ${config.autoCloseTime} · нагадування працівнику о ${config.remindTime}`,
+        `Нагадування «не відмітились»: ${db.setting('late_alert') !== '0' ? 'увімкнено (через 1 год після відкриття)' : 'вимкнено'}`,
         `Резервна копія бази: щодня о ${config.backupTime} власнику`,
-        `Автозакриття зміни: через ${config.autoCloseHours} год`,
         `Графік: ${S.scheduleText()}`,
-        `AI: ${u.model} · цього місяця ${u.calls} запитів, ≈ $${u.cost_usd.toFixed(2)} із ліміту $${u.limitUsd}`,
       ];
       return say(ctx, lines.filter(Boolean).join('\n'), new InlineKeyboard().text('🕘 Час підсумку', 'st:time').text('📊 Підсумок дня зараз', 'st:daily').row().text('💾 Копія зараз', 'st:backup').text('📣 Тест у групу', 'st:test').row().text('🔔 Нагадування вкл/викл', 'st:late').text('🔄 Оновити бота', 'st:update'));
     }
@@ -634,24 +704,46 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
 
   async function onFlowText(ctx, f, text) {
     const uid = ctx.from.id;
-    if (f.name === 'ai') {
-      await ctx.replyWithChatAction('typing').catch(() => {});
-      const r = await ai.ask(ctx.emp, text);
-      return say(ctx, esc(r.text), aiKb());
-    }
     if (f.name === 'report') {
       clearFlow(uid);
-      return saveReport(ctx, { kind: 'text', text });
+      await saveReport(ctx, f.data.category, null, text);
+      return menu(ctx, 'Збережено як текст. Фото можна надіслати окремо.');
+    }
+    if (f.name === 'problem') {
+      if (f.step === 'text') {
+        f.data.text = text; f.step = 'media';
+        return say(ctx, 'Тепер фото або відео проблеми (можна кілька, по одному), або «Готово», якщо без фото:', doneKb());
+      }
+      if (text === B.done) {
+        clearFlow(uid);
+        const rep = await saveReport(ctx, 'problem', null, f.data.text);
+        return menu(ctx, `Дякую, власника повідомлено про проблему #${rep.id}.`);
+      }
+      return say(ctx, 'Надішліть фото / відео або натисніть «Готово».', doneKb());
     }
     if (f.name === 'rpcomment') {
       clearFlow(uid); R.setComment(db, f.data.id, text);
-      return menu(ctx, `✅ Коментар до звіту #${f.data.id} збережено.`);
+      return menu(ctx, `✅ Коментар до #${f.data.id} збережено.`);
     }
     if (f.name === 'rvdate') {
       const d = T.parseDate(text); if (!d) return say(ctx, 'Не зрозумів дату. Формат: ДД.ММ.РРРР', cancelKb());
       clearFlow(uid); await menu(ctx, `Шукаю за ${T.uaDate(d)}…`);
-      return listReports(ctx, R.onDate(db, d), `Звіти за ${T.uaDate(d)}`);
+      return listReports(ctx, R.onDate(db, d, f.data.cat), `За ${T.uaDate(d)}`);
     }
+    if (f.name === 'hpadd') {
+      if (f.step === 'section') { f.data.section = text.slice(0, 40); f.step = 'title'; return say(ctx, `Розділ: <b>${esc(f.data.section)}</b>\nНазва інструкції:`, cancelKb()); }
+      if (f.step === 'title') { f.data.title = text.slice(0, 80); f.step = 'body'; return say(ctx, 'Текст інструкції (кроки), або Пропустити:', skipKb()); }
+      if (f.step === 'body') { f.data.body = text === B.skip ? '' : text; f.step = 'media'; return say(ctx, 'Скріншоти / відео (по одному), потім «Готово»:', doneKb()); }
+      if (f.step === 'media') {
+        if (text !== B.done) return say(ctx, 'Надішліть фото / відео або натисніть «Готово».', doneKb());
+        clearFlow(uid);
+        const art = H.add(db, { section: f.data.section, title: f.data.title, body: f.data.body, media: f.data.media }, ctx.emp.id);
+        await menu(ctx, `✅ Інструкцію «${esc(art.title)}» додано в розділ ${esc(art.section)}.`);
+        return showArticle(ctx, art.id);
+      }
+    }
+    if (f.name === 'hpedit') { clearFlow(uid); H.setBody(db, f.data.id, text, ctx.emp.id); await menu(ctx, '✅ Текст оновлено.'); return showArticle(ctx, f.data.id); }
+    if (f.name === 'hpmedia') { if (text === B.done) { clearFlow(uid); await menu(ctx, '✅ Готово.'); return showArticle(ctx, f.data.id); } return say(ctx, 'Надішліть фото / відео або натисніть «Готово».', doneKb()); }
     if (f.name === 'ledger') {
       if (f.step === 'amount') {
         const n = Number(text.replace(/\s/g, '').replace(',', '.'));
@@ -669,8 +761,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
     if (f.name === 'alarm') {
       if (f.step !== 'text') return say(ctx, 'Підтвердіть кнопкою вище або скасуйте.', cancelKb());
       clearFlow(uid);
-      const msg = text === B.noText ? '' : text;
-      return sendAlarm(ctx, msg);
+      return sendAlarm(ctx, text === B.noText ? '' : text);
     }
     if (f.name === 'fxtime') {
       const s = S.byId(db, f.data.id); if (!s) { clearFlow(uid); return menu(ctx, 'Зміну не знайдено.'); }
@@ -682,7 +773,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       if (!r.ok) return say(ctx, `❌ ${r.reason}`, cancelKb());
       clearFlow(uid);
       await menu(ctx, `✅ Зміну виправлено: ${esc(r.shift.name)} ${esc(S.line(r.shift))}`);
-      return notify.toGroup(`📝 ${esc(ctx.emp.name)} виправив(ла) зміну ${esc(r.shift.name)}: ${esc(S.line(r.shift))}`);
+      return notify.event(`📝 ${esc(ctx.emp.name)} виправив(ла) зміну ${esc(r.shift.name)}: ${esc(S.line(r.shift))}`, { actorTgId: uid });
     }
     if (f.name === 'fxnew') {
       if (f.step === 'date') { const d = T.parseDate(text); if (!d) return say(ctx, 'Формат: ДД.ММ.РРРР', cancelKb()); f.data.date = d; f.step = 'start'; return say(ctx, 'Час початку (ГГ:ХХ):', cancelKb()); }
@@ -694,7 +785,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
         if (!r.ok) return say(ctx, `❌ ${r.reason}`, cancelKb());
         clearFlow(uid);
         await menu(ctx, `✅ Зміну додано: ${esc(r.shift.name)} ${esc(S.line(r.shift))}`);
-        return notify.toGroup(`📝 ${esc(ctx.emp.name)} додав(ла) зміну ${esc(r.shift.name)}: ${esc(S.line(r.shift))}`);
+        return notify.event(`📝 ${esc(ctx.emp.name)} додав(ла) зміну ${esc(r.shift.name)}: ${esc(S.line(r.shift))}`, { actorTgId: uid });
       }
     }
     if (f.name === 'emtg') {
@@ -714,7 +805,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       return say(ctx, 'Підтвердіть кнопкою вище або скасуйте.', cancelKb());
     }
     if (f.name === 'emadd') {
-      if (f.step === 'name') { if (text.length < 2) return say(ctx, "Ім'я закоротке:", cancelKb()); f.data.name = text; f.step = 'pt'; return say(ctx, 'Тип оплати:', new InlineKeyboard().text('За робочий день', 'em:pt:daily').text('За місяць', 'em:pt:monthly').row().text('Без зарплати (адміністратор)', 'em:pt:none')); }
+      if (f.step === 'name') { if (text.length < 2) return say(ctx, "Ім'я закоротке:", cancelKb()); f.data.name = text; f.step = 'pt'; return say(ctx, 'Тип оплати:', new InlineKeyboard().text('За годину', 'em:pt:hourly').text('За день', 'em:pt:daily').text('За місяць', 'em:pt:monthly').row().text('Без зарплати (адміністратор)', 'em:pt:none')); }
       if (f.step === 'rate') { const n = Number(text.replace(/\s/g, '')); if (!Number.isInteger(n) || n < 0) return say(ctx, 'Введіть ціле число:', cancelKb()); f.data.rate = n; f.step = 'g'; return say(ctx, 'Як підписати кнопки?', new InlineKeyboard().text('Прийшла / Пішла', 'em:g:f').text('Прийшов / Пішов', 'em:g:m')); }
       return say(ctx, 'Оберіть кнопкою вище або скасуйте.', cancelKb());
     }

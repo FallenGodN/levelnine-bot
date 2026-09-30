@@ -108,7 +108,7 @@ if (-not (Test-Path '.env')) {
   if (-not $token.Trim()) { Fail 'токен порожній — запустіть інсталятор ще раз і введіть токен' }
   @(
     "BOT_TOKEN=$($token.Trim())", "OWNER_TELEGRAM_ID=$($owner.Trim())", "OPENAI_API_KEY=$($openai.Trim())",
-    'OPENAI_MODEL=gpt-4.1-mini', 'OPENAI_MONTHLY_LIMIT_USD=10', 'DAILY_REPORT_TIME=22:30', 'BACKUP_TIME=03:30', 'DATA_DIR=./data', 'TZ_NAME=Europe/Kyiv'
+    '', '', 'DAILY_REPORT_TIME=22:30', 'BACKUP_TIME=03:30', 'DATA_DIR=./data', 'TZ_NAME=Europe/Kyiv'
   ) | Set-Content -Path '.env' -Encoding ASCII
   Say '.env збережено.'
 }

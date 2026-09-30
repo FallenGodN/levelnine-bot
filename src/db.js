@@ -82,6 +82,16 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+CREATE TABLE IF NOT EXISTS help (
+  id INTEGER PRIMARY KEY,
+  section TEXT NOT NULL,                      -- Level Nine | Instasport | …
+  title TEXT NOT NULL,
+  body TEXT,
+  media TEXT,                                 -- JSON [{kind, file_id}]
+  ord INTEGER NOT NULL DEFAULT 0,
+  updated_by INTEGER,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY,
   actor_id INTEGER,
@@ -92,11 +102,26 @@ CREATE TABLE IF NOT EXISTS audit (
 `;
 
 const SEED = [
-  { name: 'Юлія', role: 'employee', pay_type: 'daily', rate: config.dailyRate, gender: 'f' },
-  { name: 'Ірина', role: 'employee', pay_type: 'daily', rate: config.dailyRate, gender: 'f' },
-  { name: 'Прибиральник', role: 'employee', pay_type: 'monthly', rate: config.cleanerMonthly, gender: 'm' },
+  { name: 'Юлія', role: 'employee', pay_type: 'hourly', rate: config.hourlyRate, gender: 'f' },
+  { name: 'Ірина', role: 'employee', pay_type: 'hourly', rate: config.hourlyRate, gender: 'f' },
   { name: 'Власник', role: 'owner', pay_type: 'none', rate: 0, gender: 'm' },
 ];
+
+/** Міграції для баз, створених попередніми версіями. */
+function migrate(db) {
+  const cols = (t) => db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
+  const rc = cols('reports');
+  if (!rc.includes('category')) db.exec("ALTER TABLE reports ADD COLUMN category TEXT NOT NULL DEFAULT 'cash'"); // cash | photo | problem
+  if (!rc.includes('status')) db.exec("ALTER TABLE reports ADD COLUMN status TEXT NOT NULL DEFAULT 'new'");        // new | done (для проблем)
+  if (!rc.includes('msg_id')) db.exec('ALTER TABLE reports ADD COLUMN msg_id INTEGER');
+  const v = Number(db.prepare("SELECT value FROM settings WHERE key = 'schema_v'").get()?.value || 0);
+  if (v < 2) {
+    // ТЗ 30.09.2026: Юлія та Ірина — 100 грн/год; прибиральника у списку немає → деактивуємо (можна повернути в 👥)
+    db.prepare("UPDATE employees SET pay_type = 'hourly', rate = ? WHERE pay_type = 'daily'").run(config.hourlyRate);
+    db.prepare("UPDATE employees SET active = 0 WHERE name = 'Прибиральник' AND pay_type = 'monthly'").run();
+    db.prepare("INSERT INTO settings (key, value) VALUES ('schema_v', '2') ON CONFLICT(key) DO UPDATE SET value = '2'").run();
+  }
+}
 
 function open(file) {
   const dbFile = file || path.join(config.dataDir, 'levelnine.sqlite');
@@ -106,6 +131,7 @@ function open(file) {
   db.pragma('synchronous = FULL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
+  migrate(db);
   if (db.prepare('SELECT COUNT(*) c FROM employees').get().c === 0) {
     const ins = db.prepare('INSERT INTO employees (name, role, pay_type, rate, gender) VALUES (@name, @role, @pay_type, @rate, @gender)');
     for (const e of SEED) ins.run(e);

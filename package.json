@@ -5,7 +5,9 @@
   "private": true,
   "type": "commonjs",
   "main": "src/index.js",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test test/"
@@ -13,8 +15,6 @@
   "dependencies": {
     "better-sqlite3": "^11.3.0",
     "grammy": "^1.30.0",
-    "openai": "^4.68.0",
-    "pdf-parse": "^1.1.1",
     "xlsx": "^0.18.5"
   }
 }

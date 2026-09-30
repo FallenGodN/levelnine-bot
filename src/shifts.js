@@ -42,14 +42,21 @@ function end(db, emp, now = new Date()) {
   return { none: false, outside: !!outside, shift: db.prepare('SELECT * FROM shifts WHERE id = ?').get(open.id) };
 }
 
-/** Автозакриття: усе, що відкрите довше за autoCloseHours. Повертає закриті зміни. */
+/** Момент автозакриття для зміни: config.autoCloseTime (22:20) у день початку; якщо зміна почалась пізніше — наступного дня. */
+function autoCloseAt(s) {
+  const t = T.kyivToIso(s.date, config.autoCloseTime);
+  return t > s.started_at ? t : T.kyivToIso(T.addDays(s.date, 1), config.autoCloseTime);
+}
+
+/** Автозакриття: усі відкриті зміни, чий момент автозакриття вже настав. Повертає закриті зміни. */
 function autoClose(db, now = new Date()) {
-  const limit = new Date(now.getTime() - config.autoCloseHours * 3600000).toISOString();
-  const rows = db.prepare('SELECT s.*, e.name FROM shifts s JOIN employees e ON e.id = s.emp_id WHERE s.ended_at IS NULL AND s.started_at <= ?').all(limit);
+  const nowIso = T.iso(now);
+  const rows = db.prepare('SELECT s.*, e.name FROM shifts s JOIN employees e ON e.id = s.emp_id WHERE s.ended_at IS NULL').all();
   const upd = db.prepare('UPDATE shifts SET ended_at = ?, auto_closed = 1 WHERE id = ? AND ended_at IS NULL');
   const closed = [];
   for (const s of rows) {
-    const endAt = new Date(new Date(s.started_at).getTime() + config.autoCloseHours * 3600000).toISOString();
+    const endAt = autoCloseAt(s);
+    if (endAt > nowIso) continue;
     if (upd.run(endAt, s.id).changes) closed.push({ ...s, ended_at: endAt, auto_closed: 1 });
   }
   return closed;
@@ -115,4 +122,4 @@ function line(s) {
   return `${T.uaDate(s.date)} ${st}–${en}${dur}${tags.length ? ' · ' + tags.join(', ') : ''}`;
 }
 
-module.exports = { outsideSchedule, scheduleText, openShiftOf, start, end, autoClose, working, onDate, forEmployee, recent, byId, edit, remove, create, line };
+module.exports = { outsideSchedule, scheduleText, openShiftOf, start, end, autoClose, autoCloseAt, working, onDate, forEmployee, recent, byId, edit, remove, create, line };

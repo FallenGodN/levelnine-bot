@@ -83,7 +83,7 @@ test('updater: a commit made in the folder after start still counts as an update
 
 function harness() {
   const db = open(':memory:');
-  E.link(db, 4, 1000, null); E.link(db, 1, 2001, null);
+  E.link(db, E.owner(db).id, 1000, null); E.link(db, 1, 2001, null);
   db.setting('admin_chat_id', '-5');
   const sent = [];
   const api = { sendMessage: async (chat_id, text) => { sent.push({ chat_id, text }); return { message_id: sent.length }; }, sendDocument: async () => ({ message_id: 1 }) };
@@ -112,21 +112,25 @@ test('scheduler: late-check-in alert once per day, toggle, weekend window', asyn
   assert.strictEqual(r.late, false);
 });
 
-test('scheduler: reminder one hour before auto-close, once per shift, then auto-close', async () => {
+test('scheduler: reminder at 21:50 to those still on shift, then auto-close at 22:20, owner notified', async () => {
   const h = harness();
   const sch = createScheduler({ db: h.db, notify: h.notify, api: h.api });
   S.start(h.db, E.byId(h.db, 1), at('2026-09-21', '08:00'));
-  let r = await sch.tick(at('2026-09-21', '16:59'));
+  let r = await sch.tick(at('2026-09-21', '21:49'));
   assert.strictEqual(r.reminded.length, 0);
-  r = await sch.tick(at('2026-09-21', '17:00'));
+  r = await sch.tick(at('2026-09-21', '21:50'));
   assert.strictEqual(r.reminded.length, 1);
   const dm = h.sent.find((s) => s.chat_id === 2001);
-  assert.match(dm.text, /Ви на зміні з 08:00[\s\S]*🔴 Пішла/);
-  r = await sch.tick(at('2026-09-21', '17:30'));
+  assert.match(dm.text, /Ви на зміні з 08:00[\s\S]*🔴 Пішла[\s\S]*22:20/);
+  r = await sch.tick(at('2026-09-21', '22:00'));
   assert.strictEqual(r.reminded.length, 0);
-  r = await sch.tick(at('2026-09-21', '18:00'));
+  r = await sch.tick(at('2026-09-21', '22:20'));
   assert.strictEqual(r.closed.length, 1);
   assert.strictEqual(h.sent.filter((s) => s.chat_id === 2001).length, 1);
+  // group AND owner get the auto-close event
+  const auto = h.sent.filter((s) => /закрито автоматично о 22:20/.test(s.text));
+  assert.deepStrictEqual(auto.map((s) => s.chat_id).sort(), [-5, 1000]);
+  assert.match(auto[0].text, /14 год 20 хв/);
 });
 
 test('scheduler: update tick applies an update, notifies the group and restarts', async () => {
@@ -154,15 +158,15 @@ test('export: monthly workbook has four sheets with the right numbers', () => {
   const yu = E.byId(h.db, 1);
   S.start(h.db, yu, at('2026-09-01', '09:00')); S.end(h.db, yu, at('2026-09-01', '15:00'));
   S.start(h.db, yu, at('2026-09-02', '09:00')); S.end(h.db, yu, at('2026-09-02', '19:30'));
-  P.addLedger(h.db, { emp_id: yu.id, type: 'advance', amount: 700, comment: 'на ліки', admin_id: 4, idem_key: 'x' });
+  P.addLedger(h.db, { emp_id: yu.id, type: 'advance', amount: 700, comment: 'на ліки', admin_id: E.owner(h.db).id, idem_key: 'x' });
   const XLSX = require('xlsx');
   const wb = monthWorkbook(h.db, '2026-09');
-  assert.deepStrictEqual(wb.SheetNames, ['Підсумок', 'Зміни', 'Аванси і виплати', 'Звіти каси']);
+  assert.deepStrictEqual(wb.SheetNames, ['Підсумок', 'Зміни', 'Аванси і виплати', 'Звіти']);
   const sum = XLSX.utils.sheet_to_json(wb.Sheets['Підсумок'], { header: 1 });
-  assert.deepStrictEqual(sum[1], ['Юлія', '1400 грн/день', 2, 2800, 700, 0, 2100]);
-  assert.deepStrictEqual(sum[sum.length - 1].slice(0, 4), ['Разом', '', '', 2800 + 12000]);
+  assert.deepStrictEqual(sum[1], ['Юлія', '100 грн/год', 16.5, 990, 1650, 700, 0, 950]);
+  assert.deepStrictEqual(sum[sum.length - 1].slice(0, 5), ['Разом', '', 16.5, 990, 1650]);
   const sh = XLSX.utils.sheet_to_json(wb.Sheets['Зміни'], { header: 1 });
-  assert.deepStrictEqual(sh[2].slice(0, 5), ['02.09.2026', 'Юлія', '09:00', '19:30', '10 год 30 хв']);
+  assert.deepStrictEqual(sh[2].slice(0, 7), ['02.09.2026', 'Юлія', '09:00', '19:30', 630, '10 год 30 хв', 1050]);
   const led = XLSX.utils.sheet_to_json(wb.Sheets['Аванси і виплати'], { header: 1 });
   assert.deepStrictEqual(led[1].slice(1, 6), ['Юлія', 'аванс', 700, 'на ліки', 'Власник']);
   const f = monthXlsx(h.db, '2026-09');

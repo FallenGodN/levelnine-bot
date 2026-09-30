@@ -75,7 +75,16 @@ const addDays = (date, n) => { const [y, m, d] = date.split('-').map(Number); re
 const weekdayOf = (date) => { const [y, m, d] = date.split('-').map(Number); return parts(fromKyiv(y, m, d, 12)).wd; };
 
 /** 1400 → «1 400 грн» (без залежності від ICU) */
-const money = (n) => `${String(Math.trunc(Number(n))).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} грн`;
+const money = (n) => {
+  const v = Math.round(Number(n) * 100) / 100;
+  const neg = v < 0 ? '-' : '';
+  const abs = Math.abs(v);
+  const whole = String(Math.floor(abs)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  const kop = Math.round((abs - Math.floor(abs)) * 100);
+  return `${neg}${whole}${kop ? ',' + String(kop).padStart(2, '0') : ''} грн`;
+};
+/** 755 хв → «12 год 35 хв» */
+const hoursText = (min) => { min = Math.max(0, Math.round(min)); return `${Math.floor(min / 60)} год ${String(min % 60).padStart(2, '0')} хв`; };
 
 function hoursBetween(a, b) { return (new Date(b) - new Date(a)) / 3600000; }
 function durText(a, b) {
@@ -83,4 +92,4 @@ function durText(a, b) {
   return `${Math.floor(min / 60)} год ${String(min % 60).padStart(2, '0')} хв`;
 }
 
-module.exports = { parts, fromKyiv, parseDate, parseTime, kyivToIso, iso, uaDate, uaDateTime, uaTime, uaMonth, addMonths, addDays, weekdayOf, hoursBetween, durText, WDS, money };
+module.exports = { parts, fromKyiv, parseDate, parseTime, kyivToIso, iso, uaDate, uaDateTime, uaTime, uaMonth, addMonths, addDays, weekdayOf, hoursBetween, durText, WDS, money, hoursText };

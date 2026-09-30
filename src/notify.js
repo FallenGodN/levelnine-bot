@@ -26,6 +26,26 @@ function createNotifier({ api, db }) {
     return send(ownerId(), text, extra);
   }
   const toOwner = (text, extra) => send(ownerId(), text, extra);
+  /** Подія для власника: у групу (якщо є) І власнику особисто (якщо він не автор). */
+  async function event(text, { actorTgId = null, extra } = {}) {
+    const out = [];
+    const g = groupId(); const o = ownerId();
+    if (g) out.push(await send(g, text, extra));
+    if (o && o !== actorTgId) out.push(await send(o, text, extra));
+    if (!g && !o) out.push({ ok: false, reason: 'no chat id' });
+    return out;
+  }
+  /** Копія медіа (фото/відео/документ) у ті самі чати. */
+  async function eventMedia(kind, fileId, caption, { actorTgId = null } = {}) {
+    const targets = [groupId(), ownerId()].filter((id, i, a) => id && a.indexOf(id) === i && id !== actorTgId);
+    for (const id of targets) {
+      try {
+        if (kind === 'photo') await api.sendPhoto(id, fileId, { caption });
+        else if (kind === 'video') await api.sendVideo(id, fileId, { caption });
+        else if (kind === 'document') await api.sendDocument(id, fileId, { caption });
+      } catch (e) { console.error('eventMedia', id, e && e.message); }
+    }
+  }
   /** Усім адміністраторам приватно (без дублювання власнику, якщо він у списку). */
   async function toAdmins(text, extra) {
     const ids = new Set(E.admins(db).map((a) => a.telegram_id));
@@ -41,7 +61,7 @@ function createNotifier({ api, db }) {
     } catch (e) { console.error('document failed', e && e.message); return { ok: false, reason: e && e.message }; }
   }
 
-  return { send, toGroup, toOwner, toAdmins, document, groupId, ownerId, esc };
+  return { send, toGroup, toOwner, toAdmins, event, eventMedia, document, groupId, ownerId, esc };
 }
 
 module.exports = { createNotifier, esc };
