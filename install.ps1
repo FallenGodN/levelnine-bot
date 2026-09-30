@@ -104,11 +104,9 @@ if (-not (Test-Path '.env')) {
   Say 'Потрібно два значення. Токен беруть у @BotFather, ID власника показує бот на /start.'
   $token = "$(Read-Host '  Токен бота (BOT_TOKEN)')"
   $owner = "$(Read-Host '  Telegram ID власника (OWNER_TELEGRAM_ID)')"
-  $openai = "$(Read-Host '  Ключ OpenAI (Enter — пропустити)')"
   if (-not $token.Trim()) { Fail 'токен порожній — запустіть інсталятор ще раз і введіть токен' }
   @(
-    "BOT_TOKEN=$($token.Trim())", "OWNER_TELEGRAM_ID=$($owner.Trim())", "OPENAI_API_KEY=$($openai.Trim())",
-    '', '', 'DAILY_REPORT_TIME=22:30', 'BACKUP_TIME=03:30', 'DATA_DIR=./data', 'TZ_NAME=Europe/Kyiv'
+    "BOT_TOKEN=$($token.Trim())", "OWNER_TELEGRAM_ID=$($owner.Trim())", "EXTRA_ADMINS=", 'DAILY_REPORT_TIME=22:30', 'BACKUP_TIME=03:30', 'DATA_DIR=./data', 'TZ_NAME=Europe/Kyiv'
   ) | Set-Content -Path '.env' -Encoding ASCII
   Say '.env збережено.'
 }

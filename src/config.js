@@ -17,9 +17,6 @@ const env = (k, d) => (process.env[k] === undefined || process.env[k] === '' ? d
 
 const config = {
   botToken: env('BOT_TOKEN', ''),
-  openaiKey: env('OPENAI_API_KEY', ''),
-  openaiModel: env('OPENAI_MODEL', 'gpt-4.1-mini'),
-  openaiMonthlyLimitUsd: Number(env('OPENAI_MONTHLY_LIMIT_USD', 10)),
   ownerTelegramId: Number(env('OWNER_TELEGRAM_ID', 0)) || 0,
   adminChatId: Number(env('ADMIN_CHAT_ID', 0)) || 0,
   // Додаткові адміністратори без зарплати: EXTRA_ADMINS=947529523:Максим,123456:Олена
