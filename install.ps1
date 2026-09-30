@@ -49,15 +49,16 @@ Say "[2/5] Git: $((git --version) -replace 'git version ','')"
 if ($Dir -eq $here) {
   Say "[3/5] Використовую цю папку: $Dir"
 } elseif (Test-Path (Join-Path $Dir '.git')) {
-  Say "[3/5] Оновлюю бота в $Dir..."
-  $p = Start-Process cmd.exe -ArgumentList "/c git -C `"$Dir`" pull --ff-only origin main" -Wait -PassThru -NoNewWindow
-  if ($p.ExitCode -ne 0) { Fail 'git pull не вдався' }
+  Say "[3/5] Оновлюю бота в $Dir (відновлюю всі файли з GitHub)..."
+  $p = Start-Process cmd.exe -ArgumentList "/c git -C `"$Dir`" fetch --quiet origin main && git -C `"$Dir`" reset --hard --quiet origin/main" -Wait -PassThru -NoNewWindow
+  if ($p.ExitCode -ne 0) { Fail 'git fetch/reset не вдався' }
 } else {
   Say "[3/5] Завантажую бота в $Dir..."
   $p = Start-Process cmd.exe -ArgumentList "/c git clone --quiet $Repo `"$Dir`"" -Wait -PassThru -NoNewWindow
   if ($p.ExitCode -ne 0) { Fail 'git clone не вдався' }
 }
 Set-Location $Dir
+if (-not (Test-Path (Join-Path $Dir 'package.json'))) { Fail "у $Dir немає package.json навіть після відновлення — перевірте антивірус" }
 
 Say '[4/5] Встановлюю залежності (1–2 хв)...'
 $ok = $false
