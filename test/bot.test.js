@@ -334,3 +334,41 @@ test('admin group setup via /chatid, settings screen, who is working, history', 
   await h.cb(IR, 'em:rate:3');
   assert.ok(h.answers().some((t) => /лише власник/.test(t)));
 });
+
+test('settings: version, update button, Excel export of the monthly report', async () => {
+  const h = await harness();
+  let applied = 0, restarted = 0;
+  h.bot.deps.updater = {
+    version: async () => ({ hash: 'abc1234', date: '2026-09-30', subject: 'excel export', text: 'abc1234 · 2026-09-30' }),
+    check: async () => (applied ? { ok: true, behind: false, local: 'def5678' } : { ok: true, behind: true, local: 'abc1234', remote: 'def5678', changes: ['def5678 excel export'] }),
+    apply: async () => { applied++; return { ok: true, updated: true, from: 'abc1234', to: 'def5678', deps: false }; },
+  };
+  h.bot.deps.restart = () => { restarted++; };
+  await h.text(OWNER, B.settings);
+  assert.match(h.lastText(OWNER), /Версія: abc1234 · 2026-09-30 — excel export/);
+  assert.match(h.kbTexts(h.last(OWNER)), /st:update/);
+  await h.cb(OWNER, 'st:update');
+  assert.match(h.sent(OWNER).map((p) => p.text).join('\n'), /Є оновлення \(1\)[\s\S]*def5678 excel export/);
+  assert.match(h.lastText(GROUP), /Бот оновлено abc1234 → def5678/);
+  await new Promise((r) => setTimeout(r, 900));
+  assert.strictEqual(restarted, 1);
+  await h.text(OWNER, '/update');
+  assert.match(h.lastText(OWNER), /Уже остання версія \(def5678\)/);
+  await h.text(OWNER, '/version');
+  assert.match(h.lastText(OWNER), /Версія: abc1234/);
+  // employee cannot update
+  E.link(h.db, 1, YU, null);
+  await h.text(YU, '/update');
+  assert.strictEqual(applied, 1);
+  // late alert toggle
+  await h.cb(OWNER, 'st:late');
+  assert.strictEqual(h.db.setting('late_alert'), '0');
+  await h.cb(OWNER, 'st:late');
+  assert.strictEqual(h.db.setting('late_alert'), '1');
+  // excel
+  await h.text(OWNER, B.monthly);
+  assert.match(h.kbTexts(h.last(OWNER)), /mr:x:\d{4}-\d{2}/);
+  await h.cb(OWNER, `mr:x:${T.parts().month}`);
+  const doc = h.calls.find((c) => c.method === 'sendDocument' && Number(c.payload.chat_id) === OWNER);
+  assert.ok(doc); assert.match(doc.payload.caption, /Звіт за/);
+});

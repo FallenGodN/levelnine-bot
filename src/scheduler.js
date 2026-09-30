@@ -34,8 +34,56 @@ function dailyReportText(db, date) {
   ].join('\n');
 }
 
-function createScheduler({ db, notify, api, now = () => new Date() }) {
+function createScheduler({ db, notify, api, now = () => new Date(), updater = null, restart = () => process.exit(0), updateEveryMin = 10 }) {
   const reportTime = () => T.parseTime(db.setting('daily_report_time')) || config.dailyReportTime;
+  const sent = (key) => !!db.prepare('SELECT 1 FROM sent_log WHERE key = ?').get(key);
+  const mark = (key) => db.prepare('INSERT OR IGNORE INTO sent_log (key) VALUES (?)').run(key);
+  const addMin = (hhmm, m) => { const [h, mi] = hhmm.split(':').map(Number); const t = h * 60 + mi + m; return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
+
+  /** Через годину після відкриття залу: хто з денних працівників ще не відмітився. Раз на день. */
+  async function lateTick(when) {
+    if (db.setting('late_alert') === '0') return false;
+    const p = T.parts(when);
+    const win = config.schedule[p.wd];
+    if (!win || p.time < addMin(win[0], 60)) return false;
+    const key = `late:${p.date}`;
+    if (sent(key)) return false;
+    const absent = E.list(db).filter((e) => e.pay_type === 'daily' && !S.onDate(db, p.date).some((s) => s.emp_id === e.id));
+    if (absent.length) await notify.toGroup(`⏰ Зал відкрито з ${win[0]}, а ще не відмітились: ${absent.map((e) => esc(e.name)).join(', ')}`);
+    mark(key);
+    return absent.length > 0;
+  }
+
+  /** За годину до автозакриття — особисте нагадування працівнику. Раз на зміну. */
+  async function remindTick(when) {
+    const limit = new Date(when.getTime() - (config.autoCloseHours - 1) * 3600000).toISOString();
+    const rows = db.prepare('SELECT s.*, e.name, e.telegram_id, e.gender FROM shifts s JOIN employees e ON e.id = s.emp_id WHERE s.ended_at IS NULL AND s.started_at <= ?').all(limit);
+    const out = [];
+    for (const s of rows) {
+      const key = `remind:${s.id}`;
+      if (sent(key)) continue;
+      mark(key);
+      if (!s.telegram_id) continue;
+      const r = await notify.send(s.telegram_id, `⏳ Ви на зміні з ${T.uaTime(s.started_at)}. Не забудьте натиснути «🔴 ${E.left(s)}» — через годину бот закриє зміну автоматично.`);
+      if (r.ok) out.push(s);
+    }
+    return out;
+  }
+
+  /** Автооновлення з GitHub: якщо є нові коміти — pull, npm install, перезапуск. */
+  let lastUpdateCheck = 0;
+  async function updateTick(when) {
+    if (!updater) return false;
+    if (when.getTime() - lastUpdateCheck < updateEveryMin * 60000) return false;
+    lastUpdateCheck = when.getTime();
+    const c = await updater.check();
+    if (!c.ok || !c.behind) return false;
+    const r = await updater.apply();
+    if (!r.ok) { console.error('update failed', r.reason); return false; }
+    await notify.toGroup(`🔄 Бот оновлено ${r.from} → ${r.to}${r.deps ? ' (оновлено залежності)' : ''}:\n${(r.changes || []).map((l) => '• ' + esc(l)).join('\n')}\nПерезапуск.`);
+    setTimeout(restart, 800);
+    return true;
+  }
 
   async function autoCloseTick(when) {
     const closed = S.autoClose(db, when);
@@ -82,10 +130,13 @@ function createScheduler({ db, notify, api, now = () => new Date() }) {
   }
 
   async function tick(when = now()) {
-    const out = { closed: [], daily: false, backup: false };
+    const out = { closed: [], daily: false, backup: false, late: false, reminded: [], updated: false };
+    try { out.reminded = await remindTick(when); } catch (e) { console.error('remind', e); }
     try { out.closed = await autoCloseTick(when); } catch (e) { console.error('autoClose', e); }
+    try { out.late = await lateTick(when); } catch (e) { console.error('late', e); }
     try { out.daily = await dailyTick(when); } catch (e) { console.error('daily', e); }
     try { out.backup = await backupTick(when); } catch (e) { console.error('backup', e); }
+    try { out.updated = await updateTick(when); } catch (e) { console.error('update', e); }
     return out;
   }
 

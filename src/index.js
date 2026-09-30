@@ -17,8 +17,12 @@ async function main() {
   const bot = createBot({ token: config.botToken, db, deps });
   const notify = createNotifier({ api: bot.api, db });
   const ai = createAssistant({ db, client: makeClient() });
-  const scheduler = createScheduler({ db, notify, api: bot.api });
-  Object.assign(deps, { notify, ai, scheduler });
+  const { createUpdater } = require('./updater');
+  const updater = createUpdater();
+  const restart = () => { console.log('restarting for update'); scheduler.stop(); bot.stop().catch(() => {}); db.close(); process.exit(0); };
+  const scheduler = createScheduler({ db, notify, api: bot.api, updater, restart });
+  Object.assign(deps, { notify, ai, scheduler, updater, restart });
+  updater.version().then((v) => console.log('version:', v.text)).catch(() => {});
 
   await bot.api.setMyCommands([
     { command: 'start', description: 'Головне меню' },

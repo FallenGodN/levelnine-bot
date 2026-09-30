@@ -98,6 +98,12 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
     await ctx.reply(lines.join('\n'), { parse_mode: 'HTML', reply_markup: kb });
   });
 
+  bot.command(['update', 'version'], async (ctx) => {
+    if (!ctx.emp || !ctx.isAdmin) return;
+    if (ctx.message.text.startsWith('/version')) { const v = deps.updater ? await deps.updater.version() : { text: 'dev' }; return ctx.reply(`Версія: ${v.text}`); }
+    return doUpdate(ctx);
+  });
+
   bot.command('ai', async (ctx) => {
     if (!ctx.emp || !ctx.isAdmin) return;
     const q = (ctx.match || '').trim();
@@ -346,11 +352,27 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
       await say(ctx, `<b>Останні зміни</b>\n${rows.map((s) => `• ${esc(s.name)}: ${esc(S.line(s))}`).join('\n') || '— змін ще немає'}`);
       return;
     }
-    if (k === 'mr') { if (!admin) return; return showMonthly(ctx, a); }
+    if (k === 'mr') {
+      if (!admin) return;
+      if (a === 'x') {
+        const { monthXlsx } = require('./export');
+        const f = monthXlsx(db, b, T.parts().month);
+        await ctx.replyWithDocument(new InputFile(f.buffer, f.name), { caption: `📥 Звіт за ${T.uaMonth(b)}: підсумок, зміни, аванси й виплати, звіти каси` });
+        return;
+      }
+      return showMonthly(ctx, a);
+    }
 
     // --- налаштування ---
     if (k === 'st') {
       if (!admin) return;
+      if (a === 'update') return doUpdate(ctx);
+      if (a === 'late') {
+        const on = db.setting('late_alert') !== '0';
+        db.setting('late_alert', on ? '0' : '1');
+        await say(ctx, on ? '🔕 Нагадування «не відмітились» вимкнено.' : '🔔 Нагадування «не відмітились» увімкнено: через годину після відкриття залу в групу.');
+        return;
+      }
       if (a === 'time') { setFlow(uid, { name: 'sttime' }); await say(ctx, `Час щоденного підсумку (зараз ${scheduler.reportTime()}). Введіть ГГ:ХХ:`, cancelKb()); return; }
       if (a === 'backup') { const r = await scheduler.backupNow(); await say(ctx, r.ok ? '💾 Резервну копію надіслано власнику.' : `❌ Не вдалося: ${esc(r.reason || '')}`); return; }
       if (a === 'test') { const r = await notify.toGroup(`📣 Тестове повідомлення від ${esc(ctx.emp.name)}. Адмін-чат працює.`); await say(ctx, r.ok ? '✅ Доставлено в адмін-чат.' : `❌ Не доставлено: ${esc(r.reason || '')}`); return; }
@@ -409,8 +431,20 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
     lines.push(`\n<b>Разом:</b> нараховано ${money(rep.total.accrued)} · аванси ${money(rep.total.advances)} · виплати ${money(rep.total.payouts)} · залишок ${money(rep.total.balance)}`);
     const reps = R.between(db, `${month}-01`, `${month}-31`);
     lines.push(`Звітів каси за місяць: ${reps.length}`);
-    const kb = new InlineKeyboard().text('◀️', `mr:${T.addMonths(month, -1)}`).text('▶️', `mr:${T.addMonths(month, 1)}`);
+    const kb = new InlineKeyboard().text('◀️', `mr:${T.addMonths(month, -1)}`).text('📥 Excel', `mr:x:${month}`).text('▶️', `mr:${T.addMonths(month, 1)}`);
     await say(ctx, lines.join('\n'), kb);
+  }
+  async function doUpdate(ctx) {
+    if (!deps.updater) return say(ctx, 'Оновлення недоступні в цьому запуску.');
+    await say(ctx, '🔄 Перевіряю оновлення…');
+    const c = await deps.updater.check();
+    if (!c.ok) return say(ctx, `❌ Не вдалося перевірити: ${esc(c.reason)}`);
+    if (!c.behind) return say(ctx, `✅ Уже остання версія (${c.local}).`);
+    await say(ctx, `⬇️ Є оновлення (${c.changes.length}):\n${c.changes.map((l) => '• ' + esc(l)).join('\n')}\n\nВстановлюю і перезапускаюсь, це ~30 секунд.`);
+    const r = await deps.updater.apply();
+    if (!r.ok) return say(ctx, `❌ Оновлення не вдалося: ${esc(r.reason)}`);
+    await notify.toGroup(`🔄 Бот оновлено ${r.from} → ${r.to}${r.deps ? ' (оновлено залежності)' : ''}. Перезапуск.`);
+    setTimeout(() => (deps.restart || (() => process.exit(0)))(), 800);
   }
   async function listReports(ctx, rows, title) {
     if (!rows.length) return say(ctx, `${esc(title)}: звітів немає.`);
@@ -580,8 +614,11 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
     if (text === B.settings) {
       const u = ai.usage();
       const g = notify.groupId();
+      const ver = deps.updater ? await deps.updater.version() : null;
       const lines = [
         '<b>⚙️ Налаштування</b>',
+        ver ? `Версія: ${esc(ver.text)}${ver.subject ? ` — ${esc(ver.subject)}` : ''}` : null,
+        `Нагадування «не відмітились»: ${db.setting('late_alert') !== '0' ? 'увімкнено (через 1 год після відкриття)' : 'вимкнено'}`,
         `Адмін-група: ${g ? `підключено (ID ${g})` : "❌ не підключено — додайте бота в групу і надішліть там /chatid"}`,
         `Власник: ${notify.ownerId() ? `ID ${notify.ownerId()}` : '❌ не прив\'язано'}`,
         `Щоденний підсумок: ${scheduler.reportTime()} (Київ)`,
@@ -590,7 +627,7 @@ function createBot({ token = 'test', db, deps = {}, botInfo, download }) {
         `Графік: ${S.scheduleText()}`,
         `AI: ${u.model} · цього місяця ${u.calls} запитів, ≈ $${u.cost_usd.toFixed(2)} із ліміту $${u.limitUsd}`,
       ];
-      return say(ctx, lines.join('\n'), new InlineKeyboard().text('🕘 Час підсумку', 'st:time').text('📊 Підсумок дня зараз', 'st:daily').row().text('💾 Копія зараз', 'st:backup').text('📣 Тест у групу', 'st:test'));
+      return say(ctx, lines.filter(Boolean).join('\n'), new InlineKeyboard().text('🕘 Час підсумку', 'st:time').text('📊 Підсумок дня зараз', 'st:daily').row().text('💾 Копія зараз', 'st:backup').text('📣 Тест у групу', 'st:test').row().text('🔔 Нагадування вкл/викл', 'st:late').text('🔄 Оновити бота', 'st:update'));
     }
     return menu(ctx, 'Оберіть дію кнопкою нижче.');
   });
