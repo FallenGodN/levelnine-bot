@@ -6,7 +6,7 @@ rem  LEVEL NINE GYM bot — встановлення на комп'ютер за
 rem  Запустіть подвійним кліком. Ставить Node.js і Git (якщо їх нема),
 rem  завантажує бота з GitHub, питає токен, вмикає автозапуск.
 rem ============================================================
-set "REPO=https://github.com/REPO_OWNER/levelnine-bot.git"
+set "REPO=https://github.com/FallenGodN/levelnine-bot.git"
 set "DIR=C:\levelnine-bot"
 set "PATH=%ProgramFiles%\nodejs;%ProgramFiles%\Git\cmd;%LOCALAPPDATA%\Programs\Git\cmd;%PATH%"
 
