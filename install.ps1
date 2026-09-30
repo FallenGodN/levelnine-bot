@@ -61,10 +61,16 @@ Set-Location $Dir
 
 Say '[4/5] Встановлюю залежності (1–2 хв)...'
 $ok = $false
-for ($try = 1; $try -le 4; $try++) {
-  $p = Start-Process cmd.exe -ArgumentList '/c npm install --omit=dev --no-audit --no-fund --fetch-retries=5 --fetch-retry-maxtimeout=60000 > npm-install.log 2>&1' -Wait -PassThru -NoNewWindow -WorkingDirectory $Dir
+$registries = @('https://registry.npmjs.org/', 'https://registry.npmjs.org/', 'https://registry.npmmirror.com/', 'https://registry.npmmirror.com/')
+for ($try = 1; $try -le $registries.Count; $try++) {
+  if (Test-Path (Join-Path $Dir 'node_modules')) { cmd /c "rmdir /s /q `"$Dir
+ode_modules`"" 2>$null | Out-Null }
+  $reg = $registries[$try - 1]
+  $p = Start-Process cmd.exe -ArgumentList "/c npm install --omit=dev --no-audit --no-fund --fetch-retries=5 --fetch-retry-maxtimeout=60000 --registry=$reg > npm-install.log 2>&1" -Wait -PassThru -NoNewWindow -WorkingDirectory $Dir
   if ($p.ExitCode -eq 0) { $ok = $true; break }
-  Say "      спроба $try не вдалася (мережа?), повторюю через 10 с..."
+  $err = (Get-Content (Join-Path $Dir 'npm-install.log') | Where-Object { $_ -match '^npm error' } | Select-Object -First 2) -join ' | '
+  Say "      спроба $try ($reg) не вдалася: $err"
+  Say '      повторюю через 10 с...'
   Start-Sleep -Seconds 10
 }
 if (-not $ok) { Fail "npm install не вдався після 4 спроб (див. $Dir
