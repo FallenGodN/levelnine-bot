@@ -159,3 +159,5 @@ npm start                 # long polling; Ctrl+C зупиняє
 
 Тести ганяють бота через `bot.handleUpdate` зі стабом Telegram API та
 фальшивим OpenAI, тому токени для `npm test` не потрібні.
+
+Репозиторій: https://github.com/FallenGodN/levelnine-bot
